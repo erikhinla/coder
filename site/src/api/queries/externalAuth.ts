@@ -7,6 +7,10 @@ export const externalAuths = () => {
 	return {
 		queryKey: ["external-auth"],
 		queryFn: () => API.getUserExternalAuthProviders(),
+		// Reduce stale time to ensure fresh data when navigating back
+		staleTime: 30000, // 30 seconds
+		// Always refetch on mount to ensure we have the latest auth status
+		refetchOnMount: true,
 	};
 };
 
@@ -14,6 +18,10 @@ export const externalAuthProvider = (providerId: string) => {
 	return {
 		queryKey: ["external-auth", providerId],
 		queryFn: () => API.getExternalAuthProvider(providerId),
+		// Reduce stale time to ensure fresh data when navigating back
+		staleTime: 30000, // 30 seconds
+		// Always refetch on mount to ensure we have the latest auth status
+		refetchOnMount: true,
 	};
 };
 
@@ -40,6 +48,10 @@ export const exchangeExternalAuthDevice = (
 			await queryClient.invalidateQueries({
 				queryKey: ["external-auth", providerId],
 			});
+			// Also invalidate the main external auth list
+			await queryClient.invalidateQueries({
+				queryKey: ["external-auth"],
+			});
 		},
 	};
 };
@@ -51,6 +63,10 @@ export const validateExternalAuth = (
 		mutationFn: API.getExternalAuthProvider,
 		onSuccess: (data, providerId) => {
 			queryClient.setQueryData(["external-auth", providerId], data);
+			// Also invalidate the main external auth list to ensure consistency
+			queryClient.invalidateQueries({
+				queryKey: ["external-auth"],
+			});
 		},
 	};
 };
@@ -59,6 +75,7 @@ export const unlinkExternalAuths = (queryClient: QueryClient) => {
 	return {
 		mutationFn: API.unlinkExternalAuthProvider,
 		onSuccess: async () => {
+			// Invalidate all external auth queries to ensure fresh data
 			await queryClient.invalidateQueries({
 				queryKey: ["external-auth"],
 			});

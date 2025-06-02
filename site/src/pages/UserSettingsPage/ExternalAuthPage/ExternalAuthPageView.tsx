@@ -225,6 +225,10 @@ const useExternalAuth = (providerID: string, unlinked: number) => {
 	const { data: externalAuth, refetch } = useQuery({
 		...externalAuthProvider(providerID),
 		refetchInterval: externalAuthPollingState === "polling" ? 1000 : false,
+		// Force refetch on mount to ensure we have fresh data
+		refetchOnMount: true,
+		// Reduce stale time to ensure we get fresh data when navigating back to the page
+		staleTime: 30000, // 30 seconds
 	});
 
 	const signedIn = externalAuth?.authenticated;

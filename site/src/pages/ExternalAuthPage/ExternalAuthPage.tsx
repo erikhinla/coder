@@ -14,7 +14,7 @@ import { SignInLayout } from "components/SignInLayout/SignInLayout";
 import { Welcome } from "components/Welcome/Welcome";
 import { useAuthenticated } from "hooks";
 import type { FC } from "react";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "react-query";
 import { useParams, useSearchParams } from "react-router-dom";
 import ExternalAuthPageView from "./ExternalAuthPageView";
@@ -22,21 +22,19 @@ import ExternalAuthPageView from "./ExternalAuthPageView";
 const ExternalAuthPage: FC = () => {
 	const { provider } = useParams() as { provider: string };
 	const [searchParams] = useSearchParams();
-	const { permissions } = useAuthenticated();
 	const queryClient = useQueryClient();
+	const [retryCount, setRetryCount] = useState(0);
+	const [isRetrying, setIsRetrying] = useState(false);
+
 	const externalAuthProviderOpts = externalAuthProvider(provider);
-	const externalAuthProviderQuery = useQuery({
-		...externalAuthProviderOpts,
-		refetchOnWindowFocus: true,
+	const externalAuthProviderQuery = useQuery(externalAuthProviderOpts);
+
+	const externalAuthDeviceOpts = externalAuthDevice(provider);
+	const externalAuthDeviceQuery = useQuery({
+		...externalAuthDeviceOpts,
+		enabled: externalAuthProviderQuery.data?.device === true,
 	});
 
-	const externalAuthDeviceQuery = useQuery({
-		...externalAuthDevice(provider),
-		enabled:
-			Boolean(!externalAuthProviderQuery.data?.authenticated) &&
-			Boolean(externalAuthProviderQuery.data?.device),
-		refetchOnMount: false,
-	});
 	const retryDelay = useMemo(
 		() => newRetryDelay(externalAuthDeviceQuery.data?.interval),
 		[externalAuthDeviceQuery.data],
@@ -48,12 +46,33 @@ const ExternalAuthPage: FC = () => {
 			queryClient,
 		),
 		enabled: Boolean(externalAuthDeviceQuery.data),
-		retry: isExchangeErrorRetryable,
+		retry: (failureCount, error) =>
+			isExchangeErrorRetryable(error) && failureCount < 10,
 		retryDelay,
 		// We don't want to refetch the query outside of the standard retry
 		// logic, because the device auth flow is very strict about rate limits.
 		refetchOnWindowFocus: false,
 	});
+
+	// Check if we're in a redirected state and need to retry
+	const redirectedParam = searchParams?.get("redirected");
+	const isRedirected = redirectedParam && redirectedParam.toLowerCase() === "true";
+
+	// Auto-retry mechanism for redirected OAuth flows
+	useEffect(() => {
+		if (isRedirected && !externalAuthProviderQuery.data?.authenticated && retryCount < 3) {
+			const timer = setTimeout(() => {
+				setIsRetrying(true);
+				setRetryCount(prev => prev + 1);
+				// Force refetch the auth status
+				externalAuthProviderQuery.refetch().finally(() => {
+					setIsRetrying(false);
+				});
+			}, 1000 + (retryCount * 1000)); // Exponential backoff: 1s, 2s, 3s
+
+			return () => clearTimeout(timer);
+		}
+	}, [isRedirected, externalAuthProviderQuery.data?.authenticated, retryCount, externalAuthProviderQuery]);
 
 	if (externalAuthProviderQuery.isLoading || !externalAuthProviderQuery.data) {
 		return null;
@@ -71,8 +90,20 @@ const ExternalAuthPage: FC = () => {
 		!externalAuthProviderQuery.data.authenticated &&
 		!externalAuthProviderQuery.data.device
 	) {
-		const redirectedParam = searchParams?.get("redirected");
-		if (redirectedParam && redirectedParam.toLowerCase() === "true") {
+		if (isRedirected) {
+			// Show loading state while retrying
+			if (isRetrying || retryCount < 3) {
+				return (
+					<SignInLayout>
+						<Welcome>Completing authentication...</Welcome>
+						<p css={{ textAlign: "center" }}>
+							{isRetrying ? "Verifying authentication..." : "Please wait while we complete your authentication."}
+						</p>
+					</SignInLayout>
+				);
+			}
+
+			// Show error only after retries are exhausted
 			// The auth flow redirected the user here. If we redirect back to the
 			// callback, that resets the flow and we'll end up in an infinite loop.
 			// So instead, show an error, as the user expects to be authenticated at
@@ -92,7 +123,10 @@ const ExternalAuthPage: FC = () => {
 					<br />
 					<Button
 						onClick={() => {
-							// Redirect to the auth flow again. *crosses fingers*
+							// Reset retry count and try again
+							setRetryCount(0);
+							setIsRetrying(false);
+							// Redirect to the auth flow again
 							window.location.href = `/external-auth/${provider}/callback`;
 						}}
 					>
@@ -113,10 +147,14 @@ const ExternalAuthPage: FC = () => {
 					...externalAuthProviderQuery.data,
 					authenticated: false,
 				});
+				window.location.href = `/external-auth/${provider}/callback`;
 			}}
-			viewExternalAuthConfig={permissions.viewDeploymentConfig}
 			deviceExchangeError={deviceExchangeError}
 			externalAuthDevice={externalAuthDeviceQuery.data}
+			isExchangingToken={exchangeExternalAuthDeviceQuery.isLoading}
+			onExchangeToken={() => {
+				exchangeExternalAuthDeviceQuery.refetch();
+			}}
 		/>
 	);
 };
