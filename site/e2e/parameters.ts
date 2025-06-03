@@ -1,4 +1,4 @@
-import { ParameterFormType, type RichParameter } from "./provisionerGenerated";
+import type { RichParameter } from "./provisionerGenerated";
 
 // Rich parameters
 
@@ -19,7 +19,6 @@ export const emptyParameter: RichParameter = {
 	displayName: "",
 	order: 0,
 	ephemeral: false,
-	formType: ParameterFormType.DEFAULT,
 };
 
 // firstParameter is mutable string with a default value (parameter value not required).
@@ -150,7 +149,6 @@ export const firstBuildOption: RichParameter = {
 	defaultValue: "ABCDEF",
 	mutable: true,
 	ephemeral: true,
-	options: [],
 };
 
 export const secondBuildOption: RichParameter = {
@@ -163,5 +161,4 @@ export const secondBuildOption: RichParameter = {
 	defaultValue: "false",
 	mutable: true,
 	ephemeral: true,
-	options: [],
 };

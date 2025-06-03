@@ -17,10 +17,9 @@ import {
 } from "api/queries/workspaceportsharing";
 import {
 	type Template,
-	type Workspace,
+	type UpsertWorkspaceAgentPortShareRequest,
 	type WorkspaceAgent,
 	type WorkspaceAgentListeningPort,
-	type WorkspaceAgentPortShare,
 	type WorkspaceAgentPortShareLevel,
 	type WorkspaceAgentPortShareProtocol,
 	WorkspaceAppSharingLevels,
@@ -43,7 +42,7 @@ import {
 	PopoverContent,
 	PopoverTrigger,
 } from "components/deprecated/Popover/Popover";
-import { useFormik } from "formik";
+import { type FormikContextType, useFormik } from "formik";
 import { type ClassName, useClassName } from "hooks/useClassName";
 import {
 	ChevronDownIcon,
@@ -65,40 +64,31 @@ import * as Yup from "yup";
 
 interface PortForwardButtonProps {
 	host: string;
-	workspace: Workspace;
+	username: string;
+	workspaceName: string;
+	workspaceID: string;
 	agent: WorkspaceAgent;
 	template: Template;
 }
 
-export const PortForwardButton: FC<PortForwardButtonProps> = ({
-	host,
-	workspace,
-	template,
-	agent,
-}) => {
+export const PortForwardButton: FC<PortForwardButtonProps> = (props) => {
+	const { agent } = props;
 	const { entitlements } = useDashboard();
 	const paper = useClassName(classNames.paper, []);
 
-	const { data: listeningPorts } = useQuery({
+	const portsQuery = useQuery({
 		queryKey: ["portForward", agent.id],
 		queryFn: () => API.getAgentListeningPorts(agent.id),
 		enabled: agent.status === "connected",
 		refetchInterval: 5_000,
-		select: (res) => res.ports,
-	});
-
-	const { data: sharedPorts, refetch: refetchSharedPorts } = useQuery({
-		...workspacePortShares(workspace.id),
-		enabled: agent.status === "connected",
-		select: (res) => res.shares,
 	});
 
 	return (
 		<Popover>
 			<PopoverTrigger>
-				<Button disabled={!listeningPorts} size="sm" variant="subtle">
-					<Spinner loading={!listeningPorts}>
-						<span css={styles.portCount}>{listeningPorts?.length}</span>
+				<Button disabled={!portsQuery.data} size="sm" variant="subtle">
+					<Spinner loading={!portsQuery.data}>
+						<span css={styles.portCount}>{portsQuery.data?.ports.length}</span>
 					</Spinner>
 					Open ports
 					<ChevronDownIcon className="size-4" />
@@ -106,89 +96,89 @@ export const PortForwardButton: FC<PortForwardButtonProps> = ({
 			</PopoverTrigger>
 			<PopoverContent horizontal="right" classes={{ paper }}>
 				<PortForwardPopoverView
-					host={host}
-					agent={agent}
-					workspace={workspace}
-					template={template}
-					sharedPorts={sharedPorts ?? []}
-					listeningPorts={listeningPorts ?? []}
+					{...props}
+					listeningPorts={portsQuery.data?.ports}
 					portSharingControlsEnabled={
 						entitlements.features.control_shared_ports.enabled
 					}
-					refetchSharedPorts={refetchSharedPorts}
 				/>
 			</PopoverContent>
 		</Popover>
 	);
 };
 
-const openPortSchema = (): Yup.AnyObjectSchema =>
+const getValidationSchema = (): Yup.AnyObjectSchema =>
 	Yup.object({
 		port: Yup.number().required().min(9).max(65535),
 		share_level: Yup.string().required().oneOf(WorkspaceAppSharingLevels),
 	});
 
-interface PortForwardPopoverViewProps {
-	host: string;
-	workspace: Workspace;
-	agent: WorkspaceAgent;
-	template: Template;
-	sharedPorts: readonly WorkspaceAgentPortShare[];
-	listeningPorts: readonly WorkspaceAgentListeningPort[];
+interface PortForwardPopoverViewProps extends PortForwardButtonProps {
+	listeningPorts?: readonly WorkspaceAgentListeningPort[];
 	portSharingControlsEnabled: boolean;
-	refetchSharedPorts: () => void;
 }
+
+type Optional<T, K extends keyof T> = Pick<Partial<T>, K> & Omit<T, K>;
 
 export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 	host,
-	workspace,
+	workspaceName,
+	workspaceID,
 	agent,
 	template,
-	sharedPorts,
+	username,
 	listeningPorts,
 	portSharingControlsEnabled,
-	refetchSharedPorts,
 }) => {
 	const theme = useTheme();
 	const [listeningPortProtocol, setListeningPortProtocol] = useState(
-		getWorkspaceListeningPortsProtocol(workspace.id),
+		getWorkspaceListeningPortsProtocol(workspaceID),
 	);
 
-	const upsertSharedPortMutation = useMutation({
-		...upsertWorkspacePortShare(workspace.id),
-		onSuccess: refetchSharedPorts,
+	const sharedPortsQuery = useQuery({
+		...workspacePortShares(workspaceID),
+		enabled: agent.status === "connected",
 	});
+	const sharedPorts = sharedPortsQuery.data?.shares || [];
 
-	const deleteSharedPortMutation = useMutation({
-		...deleteWorkspacePortShare(workspace.id),
-		onSuccess: refetchSharedPorts,
-	});
+	const upsertSharedPortMutation = useMutation(
+		upsertWorkspacePortShare(workspaceID),
+	);
 
+	const deleteSharedPortMutation = useMutation(
+		deleteWorkspacePortShare(workspaceID),
+	);
+
+	// share port form
 	const {
 		mutateAsync: upsertWorkspacePortShareForm,
 		isPending: isSubmitting,
 		error: submitError,
-	} = useMutation({
-		...upsertWorkspacePortShare(workspace.id),
-		onSuccess: refetchSharedPorts,
-	});
-
-	const form = useFormik({
+	} = useMutation(upsertWorkspacePortShare(workspaceID));
+	const validationSchema = getValidationSchema();
+	// TODO: do partial here
+	const form: FormikContextType<
+		Optional<UpsertWorkspaceAgentPortShareRequest, "port">
+	> = useFormik<Optional<UpsertWorkspaceAgentPortShareRequest, "port">>({
 		initialValues: {
 			agent_name: agent.name,
-			port: "",
+			port: undefined,
 			protocol: "http",
 			share_level: "authenticated",
 		},
-		validationSchema: openPortSchema(),
-		onSubmit: async (values, { resetForm }) => {
-			resetForm();
+		validationSchema,
+		onSubmit: async (values) => {
+			// we need port to be optional in the initialValues so it appears empty instead of 0.
+			// because of this we need to reset the form to clear the port field manually.
+			form.resetForm();
+			await form.setFieldValue("port", "");
+
+			const port = Number(values.port);
 			await upsertWorkspacePortShareForm({
-				agent_name: values.agent_name,
-				port: Number(values.port),
-				share_level: values.share_level as WorkspaceAgentPortShareLevel,
-				protocol: values.protocol as WorkspaceAgentPortShareProtocol,
+				...values,
+				port,
 			});
+			await sharedPortsQuery.refetch();
 		},
 	});
 	const getFieldHelpers = getFormHelpers(form, submitError);
@@ -198,7 +188,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 		(port) => port.agent_name === agent.name,
 	);
 	// we don't want to show listening ports if it's a shared port
-	const filteredListeningPorts = listeningPorts.filter((port) =>
+	const filteredListeningPorts = (listeningPorts ?? []).filter((port) =>
 		filteredSharedPorts.every((sharedPort) => sharedPort.port !== port.port),
 	);
 	// only disable the form if shared port controls are entitled and the template doesn't allow sharing ports
@@ -267,7 +257,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 											| "https";
 										setListeningPortProtocol(selectedProtocol);
 										saveWorkspaceListeningPortsProtocol(
-											workspace.id,
+											workspaceID,
 											selectedProtocol,
 										);
 									}}
@@ -286,8 +276,8 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 										host,
 										port,
 										agent.name,
-										workspace.name,
-										workspace.owner_name,
+										workspaceName,
+										username,
 										listeningPortProtocol,
 									);
 									window.open(url, "_blank");
@@ -327,8 +317,8 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 							host,
 							port.port,
 							agent.name,
-							workspace.name,
-							workspace.owner_name,
+							workspaceName,
+							username,
 							listeningPortProtocol,
 						);
 						const label =
@@ -381,6 +371,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 																protocol: listeningPortProtocol,
 																share_level: "authenticated",
 															});
+															await sharedPortsQuery.refetch();
 														}}
 													>
 														<ShareIcon />
@@ -416,8 +407,8 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 								host,
 								share.port,
 								agent.name,
-								workspace.name,
-								workspace.owner_name,
+								workspaceName,
+								username,
 								share.protocol,
 							);
 							const label = share.port;
@@ -454,6 +445,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 														.value as WorkspaceAgentPortShareProtocol,
 													share_level: share.share_level,
 												});
+												await sharedPortsQuery.refetch();
 											}}
 										>
 											<MenuItem value="http">HTTP</MenuItem>
@@ -477,6 +469,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 														share_level: event.target
 															.value as WorkspaceAgentPortShareLevel,
 													});
+													await sharedPortsQuery.refetch();
 												}}
 											>
 												<MenuItem value="authenticated">Authenticated</MenuItem>
@@ -495,6 +488,7 @@ export const PortForwardPopoverView: FC<PortForwardPopoverViewProps> = ({
 													agent_name: agent.name,
 													port: share.port,
 												});
+												await sharedPortsQuery.refetch();
 											}}
 										>
 											<XIcon

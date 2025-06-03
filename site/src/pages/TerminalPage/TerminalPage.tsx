@@ -242,11 +242,9 @@ const TerminalPage: FC = () => {
 
 		let disposed = false;
 
+		// Open the web socket and hook it up to the terminal.
 		terminalWebsocketUrl(
-			// When on development mode we can bypass the proxy and connect directly.
-			process.env.NODE_ENV !== "development"
-				? proxy.preferredPathAppURL
-				: undefined,
+			proxy.preferredPathAppURL,
 			reconnectionToken,
 			workspaceAgent.id,
 			command,

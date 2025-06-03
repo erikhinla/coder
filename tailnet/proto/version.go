@@ -47,17 +47,11 @@ import (
 //     ReportConnection RPC on the Agent API.
 //
 // API v2.5:
-//   - Shipped in Coder v2.23.0
+//   - Shipped in Coder v2.xx.x // TODO(DanielleMaywood): Update version
 //   - Added `ParentId` to the agent manifest.
-//
-// API v2.6:
-//   - Shipped in Coder v2.24.0
-//   - Added support for CreateSubAgent RPC on the Agent API.
-//   - Added support for DeleteSubAgent RPC on the Agent API.
-//   - Added support for ListSubAgents RPC on the Agent API.
 const (
 	CurrentMajor = 2
-	CurrentMinor = 6
+	CurrentMinor = 5
 )
 
 var CurrentVersion = apiversion.New(CurrentMajor, CurrentMinor)

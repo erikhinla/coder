@@ -18,27 +18,9 @@ type ScriptsAPI struct {
 func (s *ScriptsAPI) ScriptCompleted(ctx context.Context, req *agentproto.WorkspaceAgentScriptCompletedRequest) (*agentproto.WorkspaceAgentScriptCompletedResponse, error) {
 	res := &agentproto.WorkspaceAgentScriptCompletedResponse{}
 
-	if req.GetTiming() == nil {
-		return nil, xerrors.New("script timing is required")
-	}
-
-	scriptID, err := uuid.FromBytes(req.GetTiming().GetScriptId())
+	scriptID, err := uuid.FromBytes(req.Timing.ScriptId)
 	if err != nil {
 		return nil, xerrors.Errorf("script id from bytes: %w", err)
-	}
-
-	scriptStart := req.GetTiming().GetStart()
-	if !scriptStart.IsValid() || scriptStart.AsTime().IsZero() {
-		return nil, xerrors.New("script start time is required and cannot be zero")
-	}
-
-	scriptEnd := req.GetTiming().GetEnd()
-	if !scriptEnd.IsValid() || scriptEnd.AsTime().IsZero() {
-		return nil, xerrors.New("script end time is required and cannot be zero")
-	}
-
-	if scriptStart.AsTime().After(scriptEnd.AsTime()) {
-		return nil, xerrors.New("script start time cannot be after end time")
 	}
 
 	var stage database.WorkspaceAgentScriptTimingStage

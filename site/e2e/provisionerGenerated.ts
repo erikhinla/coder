@@ -5,21 +5,6 @@ import { Timestamp } from "./google/protobuf/timestampGenerated";
 
 export const protobufPackage = "provisioner";
 
-export enum ParameterFormType {
-  DEFAULT = 0,
-  FORM_ERROR = 1,
-  RADIO = 2,
-  DROPDOWN = 3,
-  INPUT = 4,
-  TEXTAREA = 5,
-  SLIDER = 6,
-  CHECKBOX = 7,
-  SWITCH = 8,
-  TAGSELECT = 9,
-  MULTISELECT = 10,
-  UNRECOGNIZED = -1,
-}
-
 /** LogLevel represents severity of the log. */
 export enum LogLevel {
   TRACE = 0,
@@ -111,7 +96,6 @@ export interface RichParameter {
   displayName: string;
   order: number;
   ephemeral: boolean;
-  formType: ParameterFormType;
 }
 
 /** RichParameterValue holds the key/value mapping of a parameter. */
@@ -554,9 +538,6 @@ export const RichParameter = {
     }
     if (message.ephemeral === true) {
       writer.uint32(136).bool(message.ephemeral);
-    }
-    if (message.formType !== 0) {
-      writer.uint32(144).int32(message.formType);
     }
     return writer;
   },

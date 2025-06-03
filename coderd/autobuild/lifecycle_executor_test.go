@@ -2,6 +2,7 @@ package autobuild_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
@@ -740,7 +741,7 @@ func TestExecutorWorkspaceAutostopNoWaitChangedMyMind(t *testing.T) {
 }
 
 func TestExecutorAutostartMultipleOK(t *testing.T) {
-	if !dbtestutil.WillUsePostgres() {
+	if os.Getenv("DB") == "" {
 		t.Skip(`This test only really works when using a "real" database, similar to a HA setup`)
 	}
 

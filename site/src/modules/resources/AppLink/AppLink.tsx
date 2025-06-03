@@ -1,6 +1,5 @@
 import { useTheme } from "@emotion/react";
 import type * as TypesGen from "api/typesGenerated";
-import { DropdownMenuItem } from "components/DropdownMenu/DropdownMenu";
 import { Spinner } from "components/Spinner/Spinner";
 import {
 	Tooltip,
@@ -29,15 +28,9 @@ interface AppLinkProps {
 	workspace: TypesGen.Workspace;
 	app: TypesGen.WorkspaceApp;
 	agent: TypesGen.WorkspaceAgent;
-	grouped?: boolean;
 }
 
-export const AppLink: FC<AppLinkProps> = ({
-	app,
-	workspace,
-	agent,
-	grouped,
-}) => {
+export const AppLink: FC<AppLinkProps> = ({ app, workspace, agent }) => {
 	const { proxy } = useProxy();
 	const host = proxy.preferredWildcardHostname;
 	const [iconError, setIconError] = useState(false);
@@ -97,15 +90,7 @@ export const AppLink: FC<AppLinkProps> = ({
 
 	const canShare = app.sharing_level !== "owner";
 
-	const button = grouped ? (
-		<DropdownMenuItem asChild>
-			<a href={canClick ? link.href : undefined} onClick={link.onClick}>
-				{icon}
-				{link.label}
-				{canShare && <ShareIcon app={app} />}
-			</a>
-		</DropdownMenuItem>
-	) : (
+	const button = (
 		<AgentButton asChild>
 			<a href={canClick ? link.href : undefined} onClick={link.onClick}>
 				{icon}

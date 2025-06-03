@@ -572,7 +572,7 @@ func New(options *Options) *API {
 		TemplateScheduleStore:       options.TemplateScheduleStore,
 		UserQuietHoursScheduleStore: options.UserQuietHoursScheduleStore,
 		AccessControlStore:          options.AccessControlStore,
-		FileCache:                   files.NewFromStore(options.Database, options.PrometheusRegistry),
+		FileCache:                   files.NewFromStore(options.Database),
 		Experiments:                 experiments,
 		WebpushDispatcher:           options.WebPushDispatcher,
 		healthCheckGroup:            &singleflight.Group[string, *healthsdk.HealthcheckReport]{},
@@ -860,7 +860,7 @@ func New(options *Options) *API {
 				next.ServeHTTP(w, r)
 			})
 		},
-		httpmw.CSRF(options.DeploymentValues.HTTPCookies),
+		// httpmw.CSRF(options.DeploymentValues.HTTPCookies),
 	)
 
 	// This incurs a performance hit from the middleware, but is required to make sure
@@ -1156,10 +1156,7 @@ func New(options *Options) *API {
 				r.Use(
 					httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentDynamicParameters),
 				)
-				r.Route("/dynamic-parameters", func(r chi.Router) {
-					r.Post("/evaluate", api.templateVersionDynamicParametersEvaluate)
-					r.Get("/", api.templateVersionDynamicParametersWebsocket)
-				})
+				r.Get("/dynamic-parameters", api.templateVersionDynamicParameters)
 			})
 		})
 		r.Route("/users", func(r chi.Router) {
@@ -1535,19 +1532,17 @@ func New(options *Options) *API {
 
 	// Add CSP headers to all static assets and pages. CSP headers only affect
 	// browsers, so these don't make sense on api routes.
-	cspMW := httpmw.CSPHeaders(
-		api.Experiments,
-		options.Telemetry.Enabled(), func() []string {
-			if api.DeploymentValues.Dangerous.AllowAllCors {
-				// In this mode, allow all external requests
-				return []string{"*"}
-			}
-			if f := api.WorkspaceProxyHostsFn.Load(); f != nil {
-				return (*f)()
-			}
-			// By default we do not add extra websocket connections to the CSP
-			return []string{}
-		}, additionalCSPHeaders)
+	cspMW := httpmw.CSPHeaders(options.Telemetry.Enabled(), func() []string {
+		if api.DeploymentValues.Dangerous.AllowAllCors {
+			// In this mode, allow all external requests
+			return []string{"*"}
+		}
+		if f := api.WorkspaceProxyHostsFn.Load(); f != nil {
+			return (*f)()
+		}
+		// By default we do not add extra websocket connections to the CSP
+		return []string{}
+	}, additionalCSPHeaders)
 
 	// Static file handler must be wrapped with HSTS handler if the
 	// StrictTransportSecurityAge is set. We only need to set this header on

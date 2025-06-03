@@ -1,4 +1,5 @@
 import type { Interpolation, Theme } from "@emotion/react";
+import Button from "@mui/material/Button";
 import Collapse from "@mui/material/Collapse";
 import Divider from "@mui/material/Divider";
 import Skeleton from "@mui/material/Skeleton";
@@ -8,21 +9,12 @@ import type {
 	Workspace,
 	WorkspaceAgent,
 	WorkspaceAgentMetadata,
-	WorkspaceApp,
 } from "api/typesGenerated";
 import { isAxiosError } from "axios";
-import { Button } from "components/Button/Button";
 import { DropdownArrow } from "components/DropdownArrow/DropdownArrow";
-import {
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
-} from "components/DropdownMenu/DropdownMenu";
+import type { Line } from "components/Logs/LogLine";
 import { Stack } from "components/Stack/Stack";
 import { useProxy } from "contexts/ProxyContext";
-import { Folder } from "lucide-react";
-import { useFeatureVisibility } from "modules/dashboard/useFeatureVisibility";
 import { AppStatuses } from "pages/WorkspacePage/AppStatuses";
 import {
 	type FC,
@@ -36,7 +28,6 @@ import {
 import { useQuery } from "react-query";
 import AutoSizer from "react-virtualized-auto-sizer";
 import type { FixedSizeList as List, ListOnScrollProps } from "react-window";
-import { AgentButton } from "./AgentButton";
 import { AgentDevcontainerCard } from "./AgentDevcontainerCard";
 import { AgentLatency } from "./AgentLatency";
 import { AGENT_LOG_LINE_HEIGHT } from "./AgentLogs/AgentLogLine";
@@ -52,32 +43,46 @@ import { TerminalLink } from "./TerminalLink/TerminalLink";
 import { VSCodeDesktopButton } from "./VSCodeDesktopButton/VSCodeDesktopButton";
 import { useAgentLogs } from "./useAgentLogs";
 
-interface AgentRowProps {
+export interface AgentRowProps {
 	agent: WorkspaceAgent;
 	workspace: Workspace;
-	template: Template;
-	initialMetadata?: WorkspaceAgentMetadata[];
+	showApps: boolean;
+	showBuiltinApps?: boolean;
+	sshPrefix?: string;
+	hideSSHButton?: boolean;
+	hideVSCodeDesktopButton?: boolean;
+	serverVersion: string;
+	serverAPIVersion: string;
 	onUpdateAgent: () => void;
+	template: Template;
+	storybookAgentMetadata?: WorkspaceAgentMetadata[];
 }
 
 export const AgentRow: FC<AgentRowProps> = ({
 	agent,
 	workspace,
 	template,
+	showApps,
+	showBuiltinApps = true,
+	hideSSHButton,
+	hideVSCodeDesktopButton,
+	serverVersion,
+	serverAPIVersion,
 	onUpdateAgent,
-	initialMetadata,
+	storybookAgentMetadata,
+	sshPrefix,
 }) => {
-	const { browser_only } = useFeatureVisibility();
-	const appSections = organizeAgentApps(agent.apps);
-	const hasAppsToDisplay =
-		!browser_only || appSections.some((it) => it.apps.length > 0);
-	const shouldDisplayAgentApps =
-		(agent.status === "connected" && hasAppsToDisplay) ||
-		agent.status === "connecting";
+	// Apps visibility
+	const visibleApps = agent.apps.filter((app) => !app.hidden);
+	const hasAppsToDisplay = !hideVSCodeDesktopButton || visibleApps.length > 0;
+	const shouldDisplayApps =
+		showApps &&
+		((agent.status === "connected" && hasAppsToDisplay) ||
+			agent.status === "connecting");
 	const hasVSCodeApp =
 		agent.display_apps.includes("vscode") ||
 		agent.display_apps.includes("vscode_insiders");
-	const showVSCode = hasVSCodeApp && !browser_only;
+	const showVSCode = hasVSCodeApp && !hideVSCodeDesktopButton;
 
 	const hasStartupFeatures = Boolean(agent.logs_length);
 	const { proxy } = useProxy();
@@ -160,14 +165,6 @@ export const AgentRow: FC<AgentRowProps> = ({
 		},
 	});
 
-	// This is used to show the parent apps of the devcontainer.
-	const [showParentApps, setShowParentApps] = useState(false);
-
-	let shouldDisplayAppsSection = shouldDisplayAgentApps;
-	if (containers && containers.length > 0 && !showParentApps) {
-		shouldDisplayAppsSection = false;
-	}
-
 	return (
 		<Stack
 			key={agent.id}
@@ -187,7 +184,12 @@ export const AgentRow: FC<AgentRowProps> = ({
 					</div>
 					{agent.status === "connected" && (
 						<>
-							<AgentVersion agent={agent} onUpdate={onUpdateAgent} />
+							<AgentVersion
+								agent={agent}
+								serverVersion={serverVersion}
+								serverAPIVersion={serverAPIVersion}
+								onUpdate={onUpdateAgent}
+							/>
 							<AgentLatency agent={agent} />
 						</>
 					)}
@@ -199,34 +201,28 @@ export const AgentRow: FC<AgentRowProps> = ({
 					)}
 				</div>
 
-				<div className="flex items-center gap-2">
-					{containers && containers.length > 0 && (
-						<Button
-							variant="outline"
-							size="sm"
-							onClick={() => setShowParentApps((show) => !show)}
-						>
-							Show parent apps
-							<DropdownArrow close={showParentApps} margin={false} />
-						</Button>
-					)}
-
-					{!browser_only && agent.display_apps.includes("ssh_helper") && (
-						<AgentSSHButton
-							workspaceName={workspace.name}
-							agentName={agent.name}
-						/>
-					)}
-					{proxy.preferredWildcardHostname !== "" &&
-						agent.display_apps.includes("port_forwarding_helper") && (
-							<PortForwardButton
-								host={proxy.preferredWildcardHostname}
-								workspace={workspace}
-								agent={agent}
-								template={template}
+				{showBuiltinApps && (
+					<div css={{ display: "flex" }}>
+						{!hideSSHButton && agent.display_apps.includes("ssh_helper") && (
+							<AgentSSHButton
+								workspaceName={workspace.name}
+								agentName={agent.name}
+								sshPrefix={sshPrefix}
 							/>
 						)}
-				</div>
+						{proxy.preferredWildcardHostname !== "" &&
+							agent.display_apps.includes("port_forwarding_helper") && (
+								<PortForwardButton
+									host={proxy.preferredWildcardHostname}
+									workspaceName={workspace.name}
+									agent={agent}
+									username={workspace.owner_name}
+									workspaceID={workspace.id}
+									template={template}
+								/>
+							)}
+					</div>
+				)}
 			</header>
 
 			<div css={styles.content}>
@@ -237,9 +233,9 @@ export const AgentRow: FC<AgentRowProps> = ({
 					</section>
 				)}
 
-				{shouldDisplayAppsSection && (
+				{agent.status === "connected" && (
 					<section css={styles.apps}>
-						{shouldDisplayAgentApps && (
+						{shouldDisplayApps && (
 							<>
 								{showVSCode && (
 									<VSCodeDesktopButton
@@ -250,10 +246,10 @@ export const AgentRow: FC<AgentRowProps> = ({
 										displayApps={agent.display_apps}
 									/>
 								)}
-								{appSections.map((section, i) => (
-									<Apps
-										key={section.group ?? i}
-										section={section}
+								{visibleApps.map((app) => (
+									<AppLink
+										key={app.slug}
+										app={app}
 										agent={agent}
 										workspace={workspace}
 									/>
@@ -261,7 +257,7 @@ export const AgentRow: FC<AgentRowProps> = ({
 							</>
 						)}
 
-						{agent.display_apps.includes("web_terminal") && (
+						{showBuiltinApps && agent.display_apps.includes("web_terminal") && (
 							<TerminalLink
 								workspaceName={workspace.name}
 								agentName={agent.name}
@@ -304,7 +300,10 @@ export const AgentRow: FC<AgentRowProps> = ({
 					</section>
 				)}
 
-				<AgentMetadata initialMetadata={initialMetadata} agent={agent} />
+				<AgentMetadata
+					storybookMetadata={storybookAgentMetadata}
+					agent={agent}
+				/>
 			</div>
 
 			{hasStartupFeatures && (
@@ -323,7 +322,7 @@ export const AgentRow: FC<AgentRowProps> = ({
 									width={width}
 									css={styles.startupLogs}
 									onScroll={handleLogScroll}
-									logs={startupLogs.map((l) => ({
+									logs={startupLogs.map<Line>((l) => ({
 										id: l.id,
 										level: l.level,
 										output: l.output,
@@ -338,11 +337,11 @@ export const AgentRow: FC<AgentRowProps> = ({
 
 					<Stack css={{ padding: "12px 16px" }} direction="row" spacing={1}>
 						<Button
-							size="sm"
-							variant="subtle"
+							variant="text"
+							size="small"
+							startIcon={<DropdownArrow close={showLogs} margin={false} />}
 							onClick={() => setShowLogs((v) => !v)}
 						>
-							<DropdownArrow close={showLogs} margin={false} />
 							Logs
 						</Button>
 						<Divider orientation="vertical" variant="middle" flexItem />
@@ -351,93 +350,6 @@ export const AgentRow: FC<AgentRowProps> = ({
 				</section>
 			)}
 		</Stack>
-	);
-};
-
-type AppSection = {
-	/**
-	 * If there is no `group`, just render all of the apps inline. If there is a
-	 * group name, show them all in a dropdown.
-	 */
-	group?: string;
-
-	apps: WorkspaceApp[];
-};
-
-/**
- * organizeAgentApps returns an ordering of agent apps that accounts for
- * grouping. When we receive the list of apps from the backend, they have
- * already been "ordered" by their `order` attribute, but we are not given that
- * value. We must be careful to preserve that ordering, while also properly
- * grouping together all apps of any given group.
- *
- * The position of the group overall is determined by the `order` position of
- * the first app in the group. There may be several sections returned without
- * a group name, to allow placing grouped apps in between non-grouped apps. Not
- * every ungrouped section is expected to have a group in between, to make the
- * algorithm a little simpler to implement.
- */
-export function organizeAgentApps(apps: readonly WorkspaceApp[]): AppSection[] {
-	let currentSection: AppSection | undefined = undefined;
-	const appGroups: AppSection[] = [];
-	const groupsByName = new Map<string, AppSection>();
-
-	for (const app of apps) {
-		if (app.hidden) {
-			continue;
-		}
-
-		if (!currentSection || app.group !== currentSection.group) {
-			const existingSection = groupsByName.get(app.group!);
-			if (existingSection) {
-				currentSection = existingSection;
-			} else {
-				currentSection = {
-					group: app.group,
-					apps: [],
-				};
-				appGroups.push(currentSection);
-				if (app.group) {
-					groupsByName.set(app.group, currentSection);
-				}
-			}
-		}
-
-		currentSection.apps.push(app);
-	}
-
-	return appGroups;
-}
-
-type AppsProps = {
-	section: AppSection;
-	agent: WorkspaceAgent;
-	workspace: Workspace;
-};
-
-const Apps: FC<AppsProps> = ({ section, agent, workspace }) => {
-	return section.group ? (
-		<DropdownMenu>
-			<DropdownMenuTrigger asChild>
-				<AgentButton>
-					<Folder />
-					{section.group}
-				</AgentButton>
-			</DropdownMenuTrigger>
-			<DropdownMenuContent align="start">
-				{section.apps.map((app) => (
-					<DropdownMenuItem key={app.slug}>
-						<AppLink grouped app={app} agent={agent} workspace={workspace} />
-					</DropdownMenuItem>
-				))}
-			</DropdownMenuContent>
-		</DropdownMenu>
-	) : (
-		<>
-			{section.apps.map((app) => (
-				<AppLink key={app.slug} app={app} agent={agent} workspace={workspace} />
-			))}
-		</>
 	);
 };
 

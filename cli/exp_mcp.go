@@ -188,13 +188,18 @@ func (*RootCmd) mcpConfigureClaudeCode() *serpent.Command {
 				reportTaskPrompt = defaultReportTaskPrompt
 			}
 
-			// The Coder Prompt just allows users to extend our
+			// If a user overrides the coder prompt, we don't want to append
+			// the report task prompt, as it then becomes the responsibility
+			// of the user.
+			actualCoderPrompt := defaultCoderPrompt
 			if coderPrompt != "" {
-				reportTaskPrompt += "\n\n" + coderPrompt
+				actualCoderPrompt = coderPrompt
+			} else if reportTaskPrompt != "" {
+				actualCoderPrompt += "\n\n" + reportTaskPrompt
 			}
 
 			// We also write the system prompt to the CLAUDE.md file.
-			if err := injectClaudeMD(fs, reportTaskPrompt, systemPrompt, claudeMDPath); err != nil {
+			if err := injectClaudeMD(fs, actualCoderPrompt, systemPrompt, claudeMDPath); err != nil {
 				return xerrors.Errorf("failed to modify CLAUDE.md: %w", err)
 			}
 			cliui.Infof(inv.Stderr, "Wrote CLAUDE.md to %s", claudeMDPath)
@@ -643,7 +648,25 @@ func configureClaude(fs afero.Fs, cfg ClaudeConfig) error {
 }
 
 var (
-	defaultReportTaskPrompt = `Respect the requirements of the "coder_report_task" tool. It is pertinent to provide a fantastic user-experience.`
+	defaultCoderPrompt = `You are a helpful Coding assistant. Aim to autonomously investigate
+and solve issues the user gives you and test your work, whenever possible.
+Avoid shortcuts like mocking tests. When you get stuck, you can ask the user
+but opt for autonomy.`
+
+	defaultReportTaskPrompt = `YOU MUST REPORT ALL TASKS TO CODER.
+When reporting tasks, you MUST follow these EXACT instructions:
+- IMMEDIATELY report status after receiving ANY user message.
+- Be granular. If you are investigating with multiple steps, report each step to coder.
+
+Task state MUST be one of the following:
+- Use "state": "working" when actively processing WITHOUT needing additional user input.
+- Use "state": "complete" only when finished with a task.
+- Use "state": "failure" when you need ANY user input, lack sufficient details, or encounter blockers.
+
+Task summaries MUST:
+- Include specifics about what you're doing.
+- Include clear and actionable steps for the user.
+- Be less than 160 characters in length.`
 
 	// Define the guard strings
 	coderPromptStartGuard  = "<coder-prompt>"

@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
-	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -26,15 +26,8 @@ func TestWorkspaceBuildParam(t *testing.T) {
 			_, token = dbgen.APIKey(t, db, database.APIKey{
 				UserID: user.ID,
 			})
-			org = dbgen.Organization(t, db, database.Organization{})
-			tpl = dbgen.Template(t, db, database.Template{
-				OrganizationID: org.ID,
-				CreatedBy:      user.ID,
-			})
 			workspace = dbgen.Workspace(t, db, database.WorkspaceTable{
-				OwnerID:        user.ID,
-				OrganizationID: org.ID,
-				TemplateID:     tpl.ID,
+				OwnerID: user.ID,
 			})
 		)
 
@@ -50,7 +43,7 @@ func TestWorkspaceBuildParam(t *testing.T) {
 
 	t.Run("None", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(httpmw.ExtractWorkspaceBuildParam(db))
 		rtr.Get("/", nil)
@@ -65,7 +58,7 @@ func TestWorkspaceBuildParam(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(httpmw.ExtractWorkspaceBuildParam(db))
 		rtr.Get("/", nil)
@@ -82,7 +75,7 @@ func TestWorkspaceBuildParam(t *testing.T) {
 
 	t.Run("WorkspaceBuild", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(
 			httpmw.ExtractAPIKeyMW(httpmw.ExtractAPIKeyConfig{
@@ -98,21 +91,10 @@ func TestWorkspaceBuildParam(t *testing.T) {
 		})
 
 		r, workspace := setupAuthentication(db)
-		tv := dbgen.TemplateVersion(t, db, database.TemplateVersion{
-			TemplateID: uuid.NullUUID{
-				UUID:  workspace.TemplateID,
-				Valid: true,
-			},
-			OrganizationID: workspace.OrganizationID,
-			CreatedBy:      workspace.OwnerID,
-		})
-		pj := dbgen.ProvisionerJob(t, db, nil, database.ProvisionerJob{})
 		workspaceBuild := dbgen.WorkspaceBuild(t, db, database.WorkspaceBuild{
-			JobID:             pj.ID,
-			TemplateVersionID: tv.ID,
-			Transition:        database.WorkspaceTransitionStart,
-			Reason:            database.BuildReasonInitiator,
-			WorkspaceID:       workspace.ID,
+			Transition:  database.WorkspaceTransitionStart,
+			Reason:      database.BuildReasonInitiator,
+			WorkspaceID: workspace.ID,
 		})
 
 		chi.RouteContext(r.Context()).URLParams.Add("workspacebuild", workspaceBuild.ID.String())

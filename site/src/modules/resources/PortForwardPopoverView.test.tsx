@@ -19,12 +19,12 @@ describe("Port Forward Popover View", () => {
 				<PortForwardPopoverView
 					agent={MockWorkspaceAgent}
 					template={MockTemplate}
+					workspaceID={MockWorkspace.id}
 					listeningPorts={MockListeningPortsResponse.ports}
 					portSharingControlsEnabled
 					host="host"
-					workspace={MockWorkspace}
-					sharedPorts={[]}
-					refetchSharedPorts={jest.fn()}
+					username="username"
+					workspaceName="workspaceName"
 				/>
 			</QueryClientProvider>,
 		);

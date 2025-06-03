@@ -5,7 +5,6 @@ INSERT INTO
         name,
         description,
         type,
-        form_type,
         mutable,
         default_value,
         icon,
@@ -38,8 +37,7 @@ VALUES
         $14,
         $15,
         $16,
-        $17,
-        $18
+        $17
     ) RETURNING *;
 
 -- name: GetTemplateVersionParameters :many

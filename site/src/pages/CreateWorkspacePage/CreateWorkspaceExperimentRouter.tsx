@@ -44,11 +44,11 @@ const CreateWorkspaceExperimentRouter: FC = () => {
 	});
 
 	if (dynamicParametersEnabled) {
-		if (optOutQuery.isError) {
-			return <ErrorAlert error={optOutQuery.error} />;
+		if (optOutQuery.isLoading) {
+			return <Loader />;
 		}
 		if (!optOutQuery.data) {
-			return <Loader />;
+			return <ErrorAlert error={optOutQuery.error} />;
 		}
 
 		const toggleOptedOut = () => {

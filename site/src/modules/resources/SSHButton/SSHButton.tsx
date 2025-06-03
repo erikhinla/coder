@@ -1,5 +1,4 @@
 import type { Interpolation, Theme } from "@emotion/react";
-import { deploymentSSHConfig } from "api/queries/deployment";
 import { Button } from "components/Button/Button";
 import { CodeExample } from "components/CodeExample/CodeExample";
 import {
@@ -16,28 +15,31 @@ import {
 import { type ClassName, useClassName } from "hooks/useClassName";
 import { ChevronDownIcon } from "lucide-react";
 import type { FC } from "react";
-import { useQuery } from "react-query";
 import { docs } from "utils/docs";
 
 interface AgentSSHButtonProps {
 	workspaceName: string;
 	agentName: string;
+	sshPrefix?: string;
 }
 
 export const AgentSSHButton: FC<AgentSSHButtonProps> = ({
 	workspaceName,
 	agentName,
+	sshPrefix,
 }) => {
 	const paper = useClassName(classNames.paper, []);
-	const { data } = useQuery(deploymentSSHConfig());
-	const sshPrefix = data?.hostname_prefix;
 
 	return (
 		<Popover>
 			<PopoverTrigger>
-				<Button size="sm" variant="subtle">
+				<Button
+					size="sm"
+					variant="subtle"
+					css={{ fontSize: 13, padding: "8px 12px" }}
+				>
 					Connect via SSH
-					<ChevronDownIcon />
+					<ChevronDownIcon className="size-4 ml-2" />
 				</Button>
 			</PopoverTrigger>
 
@@ -69,7 +71,10 @@ export const AgentSSHButton: FC<AgentSSHButtonProps> = ({
 					<HelpTooltipLink
 						href={docs("/user-guides/workspace-access/jetbrains")}
 					>
-						Connect via JetBrains IDEs
+						Connect via JetBrains Gateway
+					</HelpTooltipLink>
+					<HelpTooltipLink href={docs("/user-guides/desktop")}>
+						Connect via Coder Desktop
 					</HelpTooltipLink>
 					<HelpTooltipLink href={docs("/user-guides/workspace-access#ssh")}>
 						SSH configuration

@@ -84,7 +84,6 @@ export const DynamicParameter: FC<DynamicParameterProps> = ({
 						value={value}
 						onChange={onChange}
 						disabled={disabled}
-						isPreset={isPreset}
 					/>
 				) : (
 					<ParameterField
@@ -232,7 +231,6 @@ interface DebouncedParameterFieldProps {
 	onChange: (value: string) => void;
 	disabled?: boolean;
 	id: string;
-	isPreset?: boolean;
 }
 
 const DebouncedParameterField: FC<DebouncedParameterFieldProps> = ({
@@ -241,7 +239,6 @@ const DebouncedParameterField: FC<DebouncedParameterFieldProps> = ({
 	onChange,
 	disabled,
 	id,
-	isPreset,
 }) => {
 	const [localValue, setLocalValue] = useState(
 		value !== undefined ? value : validValue(parameter.value),
@@ -254,26 +251,19 @@ const DebouncedParameterField: FC<DebouncedParameterFieldProps> = ({
 
 	// This is necessary in the case of fields being set by preset parameters
 	useEffect(() => {
-		if (isPreset && value !== undefined && value !== prevValueRef.current) {
+		if (value !== undefined && value !== prevValueRef.current) {
 			setLocalValue(value);
 			prevValueRef.current = value;
 		}
-	}, [value, isPreset]);
+	}, [value]);
 
 	useEffect(() => {
-		// Only call onChangeEvent if debouncedLocalValue is different from the previously committed value
-		// and it's not the initial undefined state.
-		if (
-			prevDebouncedValueRef.current !== undefined &&
-			prevDebouncedValueRef.current !== debouncedLocalValue
-		) {
+		if (prevDebouncedValueRef.current !== undefined) {
 			onChangeEvent(debouncedLocalValue);
 		}
 
-		// Update the ref to the current debounced value for the next comparison
 		prevDebouncedValueRef.current = debouncedLocalValue;
 	}, [debouncedLocalValue, onChangeEvent]);
-
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	const resizeTextarea = useEffectEvent(() => {
@@ -387,9 +377,11 @@ const ParameterField: FC<ParameterFieldProps> = ({
 			const parsedValues = parseStringArrayValue(value ?? "");
 
 			if (parsedValues.error) {
-				// Diagnostics on parameter already handle this case, do not duplicate error message
-				// Reset user's values to an empty array. This would overwrite any default values
-				parsedValues.values = [];
+				return (
+					<p className="text-sm text-content-destructive">
+						{parsedValues.error}
+					</p>
+				);
 			}
 
 			// Map parameter options to MultiSelectCombobox options format
@@ -438,9 +430,11 @@ const ParameterField: FC<ParameterFieldProps> = ({
 			const parsedValues = parseStringArrayValue(value ?? "");
 
 			if (parsedValues.error) {
-				// Diagnostics on parameter already handle this case, do not duplicate error message
-				// Reset user's values to an empty array. This would overwrite any default values
-				parsedValues.values = [];
+				return (
+					<p className="text-sm text-content-destructive">
+						{parsedValues.error}
+					</p>
+				);
 			}
 
 			return (
@@ -519,9 +513,7 @@ const ParameterField: FC<ParameterFieldProps> = ({
 						max={parameter.validations[0]?.validation_max ?? 100}
 						disabled={disabled}
 					/>
-					<span className="w-4 font-medium">
-						{Number.isFinite(Number(value)) ? value : "0"}
-					</span>
+					<span className="w-4 font-medium">{parameter.value.value}</span>
 				</div>
 			);
 		case "error":

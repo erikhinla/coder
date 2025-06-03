@@ -7663,21 +7663,17 @@ pending_jobs AS (
 	WHERE
 		job_status = 'pending'
 ),
-online_provisioner_daemons AS (
-	SELECT id, tags FROM provisioner_daemons pd
-	WHERE pd.last_seen_at IS NOT NULL AND pd.last_seen_at >= (NOW() - ($2::bigint || ' ms')::interval)
-),
 ranked_jobs AS (
 	-- Step 3: Rank only pending jobs based on provisioner availability
 	SELECT
 		pj.id,
 		pj.created_at,
-		ROW_NUMBER() OVER (PARTITION BY opd.id ORDER BY pj.created_at ASC) AS queue_position,
-		COUNT(*) OVER (PARTITION BY opd.id) AS queue_size
+		ROW_NUMBER() OVER (PARTITION BY pd.id ORDER BY pj.created_at ASC) AS queue_position,
+		COUNT(*) OVER (PARTITION BY pd.id) AS queue_size
 	FROM
 		pending_jobs pj
-			INNER JOIN online_provisioner_daemons opd
-					ON provisioner_tagset_contains(opd.tags, pj.tags) -- Join only on the small pending set
+			INNER JOIN provisioner_daemons pd
+					ON provisioner_tagset_contains(pd.tags, pj.tags) -- Join only on the small pending set
 ),
 final_jobs AS (
 	-- Step 4: Compute best queue position and max queue size per job
@@ -7709,11 +7705,6 @@ ORDER BY
 	fj.created_at
 `
 
-type GetProvisionerJobsByIDsWithQueuePositionParams struct {
-	IDs             []uuid.UUID `db:"ids" json:"ids"`
-	StaleIntervalMS int64       `db:"stale_interval_ms" json:"stale_interval_ms"`
-}
-
 type GetProvisionerJobsByIDsWithQueuePositionRow struct {
 	ID             uuid.UUID      `db:"id" json:"id"`
 	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
@@ -7722,8 +7713,8 @@ type GetProvisionerJobsByIDsWithQueuePositionRow struct {
 	QueueSize      int64          `db:"queue_size" json:"queue_size"`
 }
 
-func (q *sqlQuerier) GetProvisionerJobsByIDsWithQueuePosition(ctx context.Context, arg GetProvisionerJobsByIDsWithQueuePositionParams) ([]GetProvisionerJobsByIDsWithQueuePositionRow, error) {
-	rows, err := q.db.QueryContext(ctx, getProvisionerJobsByIDsWithQueuePosition, pq.Array(arg.IDs), arg.StaleIntervalMS)
+func (q *sqlQuerier) GetProvisionerJobsByIDsWithQueuePosition(ctx context.Context, ids []uuid.UUID) ([]GetProvisionerJobsByIDsWithQueuePositionRow, error) {
+	rows, err := q.db.QueryContext(ctx, getProvisionerJobsByIDsWithQueuePosition, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
@@ -11178,7 +11169,7 @@ func (q *sqlQuerier) UpdateTemplateScheduleByID(ctx context.Context, arg UpdateT
 }
 
 const getTemplateVersionParameters = `-- name: GetTemplateVersionParameters :many
-SELECT template_version_id, name, description, type, mutable, default_value, icon, options, validation_regex, validation_min, validation_max, validation_error, validation_monotonic, required, display_name, display_order, ephemeral, form_type FROM template_version_parameters WHERE template_version_id = $1 ORDER BY display_order ASC, LOWER(name) ASC
+SELECT template_version_id, name, description, type, mutable, default_value, icon, options, validation_regex, validation_min, validation_max, validation_error, validation_monotonic, required, display_name, display_order, ephemeral FROM template_version_parameters WHERE template_version_id = $1 ORDER BY display_order ASC, LOWER(name) ASC
 `
 
 func (q *sqlQuerier) GetTemplateVersionParameters(ctx context.Context, templateVersionID uuid.UUID) ([]TemplateVersionParameter, error) {
@@ -11208,7 +11199,6 @@ func (q *sqlQuerier) GetTemplateVersionParameters(ctx context.Context, templateV
 			&i.DisplayName,
 			&i.DisplayOrder,
 			&i.Ephemeral,
-			&i.FormType,
 		); err != nil {
 			return nil, err
 		}
@@ -11230,7 +11220,6 @@ INSERT INTO
         name,
         description,
         type,
-        form_type,
         mutable,
         default_value,
         icon,
@@ -11263,30 +11252,28 @@ VALUES
         $14,
         $15,
         $16,
-        $17,
-        $18
-    ) RETURNING template_version_id, name, description, type, mutable, default_value, icon, options, validation_regex, validation_min, validation_max, validation_error, validation_monotonic, required, display_name, display_order, ephemeral, form_type
+        $17
+    ) RETURNING template_version_id, name, description, type, mutable, default_value, icon, options, validation_regex, validation_min, validation_max, validation_error, validation_monotonic, required, display_name, display_order, ephemeral
 `
 
 type InsertTemplateVersionParameterParams struct {
-	TemplateVersionID   uuid.UUID         `db:"template_version_id" json:"template_version_id"`
-	Name                string            `db:"name" json:"name"`
-	Description         string            `db:"description" json:"description"`
-	Type                string            `db:"type" json:"type"`
-	FormType            ParameterFormType `db:"form_type" json:"form_type"`
-	Mutable             bool              `db:"mutable" json:"mutable"`
-	DefaultValue        string            `db:"default_value" json:"default_value"`
-	Icon                string            `db:"icon" json:"icon"`
-	Options             json.RawMessage   `db:"options" json:"options"`
-	ValidationRegex     string            `db:"validation_regex" json:"validation_regex"`
-	ValidationMin       sql.NullInt32     `db:"validation_min" json:"validation_min"`
-	ValidationMax       sql.NullInt32     `db:"validation_max" json:"validation_max"`
-	ValidationError     string            `db:"validation_error" json:"validation_error"`
-	ValidationMonotonic string            `db:"validation_monotonic" json:"validation_monotonic"`
-	Required            bool              `db:"required" json:"required"`
-	DisplayName         string            `db:"display_name" json:"display_name"`
-	DisplayOrder        int32             `db:"display_order" json:"display_order"`
-	Ephemeral           bool              `db:"ephemeral" json:"ephemeral"`
+	TemplateVersionID   uuid.UUID       `db:"template_version_id" json:"template_version_id"`
+	Name                string          `db:"name" json:"name"`
+	Description         string          `db:"description" json:"description"`
+	Type                string          `db:"type" json:"type"`
+	Mutable             bool            `db:"mutable" json:"mutable"`
+	DefaultValue        string          `db:"default_value" json:"default_value"`
+	Icon                string          `db:"icon" json:"icon"`
+	Options             json.RawMessage `db:"options" json:"options"`
+	ValidationRegex     string          `db:"validation_regex" json:"validation_regex"`
+	ValidationMin       sql.NullInt32   `db:"validation_min" json:"validation_min"`
+	ValidationMax       sql.NullInt32   `db:"validation_max" json:"validation_max"`
+	ValidationError     string          `db:"validation_error" json:"validation_error"`
+	ValidationMonotonic string          `db:"validation_monotonic" json:"validation_monotonic"`
+	Required            bool            `db:"required" json:"required"`
+	DisplayName         string          `db:"display_name" json:"display_name"`
+	DisplayOrder        int32           `db:"display_order" json:"display_order"`
+	Ephemeral           bool            `db:"ephemeral" json:"ephemeral"`
 }
 
 func (q *sqlQuerier) InsertTemplateVersionParameter(ctx context.Context, arg InsertTemplateVersionParameterParams) (TemplateVersionParameter, error) {
@@ -11295,7 +11282,6 @@ func (q *sqlQuerier) InsertTemplateVersionParameter(ctx context.Context, arg Ins
 		arg.Name,
 		arg.Description,
 		arg.Type,
-		arg.FormType,
 		arg.Mutable,
 		arg.DefaultValue,
 		arg.Icon,
@@ -11329,7 +11315,6 @@ func (q *sqlQuerier) InsertTemplateVersionParameter(ctx context.Context, arg Ins
 		&i.DisplayName,
 		&i.DisplayOrder,
 		&i.Ephemeral,
-		&i.FormType,
 	)
 	return i, err
 }
@@ -14165,15 +14150,6 @@ func (q *sqlQuerier) DeleteOldWorkspaceAgentLogs(ctx context.Context, threshold 
 	return err
 }
 
-const deleteWorkspaceSubAgentByID = `-- name: DeleteWorkspaceSubAgentByID :exec
-DELETE FROM workspace_agents WHERE id = $1 AND parent_id IS NOT NULL
-`
-
-func (q *sqlQuerier) DeleteWorkspaceSubAgentByID(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.ExecContext(ctx, deleteWorkspaceSubAgentByID, id)
-	return err
-}
-
 const getWorkspaceAgentAndLatestBuildByAuthToken = `-- name: GetWorkspaceAgentAndLatestBuildByAuthToken :one
 SELECT
 	workspaces.id, workspaces.created_at, workspaces.updated_at, workspaces.owner_id, workspaces.organization_id, workspaces.template_id, workspaces.deleted, workspaces.name, workspaces.autostart_schedule, workspaces.ttl, workspaces.last_used_at, workspaces.dormant_at, workspaces.deleting_at, workspaces.automatic_updates, workspaces.favorite, workspaces.next_start_at,
@@ -14592,67 +14568,6 @@ func (q *sqlQuerier) GetWorkspaceAgentScriptTimingsByBuildID(ctx context.Context
 			&i.DisplayName,
 			&i.WorkspaceAgentID,
 			&i.WorkspaceAgentName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const getWorkspaceAgentsByParentID = `-- name: GetWorkspaceAgentsByParentID :many
-SELECT id, created_at, updated_at, name, first_connected_at, last_connected_at, disconnected_at, resource_id, auth_token, auth_instance_id, architecture, environment_variables, operating_system, instance_metadata, resource_metadata, directory, version, last_connected_replica_id, connection_timeout_seconds, troubleshooting_url, motd_file, lifecycle_state, expanded_directory, logs_length, logs_overflowed, started_at, ready_at, subsystems, display_apps, api_version, display_order, parent_id, api_key_scope FROM workspace_agents WHERE parent_id = $1::uuid
-`
-
-func (q *sqlQuerier) GetWorkspaceAgentsByParentID(ctx context.Context, parentID uuid.UUID) ([]WorkspaceAgent, error) {
-	rows, err := q.db.QueryContext(ctx, getWorkspaceAgentsByParentID, parentID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []WorkspaceAgent
-	for rows.Next() {
-		var i WorkspaceAgent
-		if err := rows.Scan(
-			&i.ID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Name,
-			&i.FirstConnectedAt,
-			&i.LastConnectedAt,
-			&i.DisconnectedAt,
-			&i.ResourceID,
-			&i.AuthToken,
-			&i.AuthInstanceID,
-			&i.Architecture,
-			&i.EnvironmentVariables,
-			&i.OperatingSystem,
-			&i.InstanceMetadata,
-			&i.ResourceMetadata,
-			&i.Directory,
-			&i.Version,
-			&i.LastConnectedReplicaID,
-			&i.ConnectionTimeoutSeconds,
-			&i.TroubleshootingURL,
-			&i.MOTDFile,
-			&i.LifecycleState,
-			&i.ExpandedDirectory,
-			&i.LogsLength,
-			&i.LogsOverflowed,
-			&i.StartedAt,
-			&i.ReadyAt,
-			pq.Array(&i.Subsystems),
-			pq.Array(&i.DisplayApps),
-			&i.APIVersion,
-			&i.DisplayOrder,
-			&i.ParentID,
-			&i.APIKeyScope,
 		); err != nil {
 			return nil, err
 		}

@@ -2819,7 +2819,6 @@ export interface TemplateVersionParameter {
 	readonly description: string;
 	readonly description_plaintext: string;
 	readonly type: string;
-	readonly form_type: string;
 	readonly mutable: boolean;
 	readonly default_value: string;
 	readonly icon: string;
@@ -3623,7 +3622,8 @@ export interface WorkspaceBuild {
 	readonly workspace_id: string;
 	readonly workspace_name: string;
 	readonly workspace_owner_id: string;
-	readonly workspace_owner_name: string;
+	readonly workspace_owner_name?: string;
+	readonly workspace_owner_username: string;
 	readonly workspace_owner_avatar_url?: string;
 	readonly template_version_id: string;
 	readonly template_version_name: string;

@@ -12,7 +12,7 @@ import (
 
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
-	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/httpmw"
 	"github.com/coder/coder/v2/codersdk"
 )
@@ -21,7 +21,6 @@ func TestTemplateVersionParam(t *testing.T) {
 	t.Parallel()
 
 	setupAuthentication := func(db database.Store) (*http.Request, database.Template) {
-		dbtestutil.DisableForeignKeysAndTriggers(nil, db)
 		user := dbgen.User(t, db, database.User{})
 		_, token := dbgen.APIKey(t, db, database.APIKey{
 			UserID: user.ID,
@@ -48,7 +47,7 @@ func TestTemplateVersionParam(t *testing.T) {
 
 	t.Run("None", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(httpmw.ExtractTemplateVersionParam(db))
 		rtr.Get("/", nil)
@@ -63,7 +62,7 @@ func TestTemplateVersionParam(t *testing.T) {
 
 	t.Run("NotFound", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(httpmw.ExtractTemplateVersionParam(db))
 		rtr.Get("/", nil)
@@ -80,7 +79,7 @@ func TestTemplateVersionParam(t *testing.T) {
 
 	t.Run("TemplateVersion", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		rtr := chi.NewRouter()
 		rtr.Use(
 			httpmw.ExtractAPIKeyMW(httpmw.ExtractAPIKeyConfig{

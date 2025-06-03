@@ -23,7 +23,6 @@ const meta: Meta<typeof MobileMenu> = {
 	component: MobileMenu,
 	args: {
 		proxyContextValue: {
-			latenciesLoaded: true,
 			proxy: {
 				preferredPathAppURL: "",
 				preferredWildcardHostname: "",

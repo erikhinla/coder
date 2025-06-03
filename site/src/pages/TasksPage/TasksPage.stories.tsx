@@ -1,7 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { expect, spyOn, userEvent, within } from "@storybook/test";
-import { API } from "api/api";
-import { MockUsers } from "pages/UsersPage/storybookData/users";
 import {
 	MockTemplate,
 	MockUserOwner,
@@ -22,15 +20,6 @@ const meta: Meta<typeof TasksPage> = {
 	decorators: [withAuthProvider],
 	parameters: {
 		user: MockUserOwner,
-		permissions: {
-			viewDeploymentConfig: true,
-		},
-	},
-	beforeEach: () => {
-		spyOn(API, "getUsers").mockResolvedValue({
-			users: MockUsers,
-			count: MockUsers.length,
-		});
 	},
 };
 
@@ -73,8 +62,7 @@ export const LoadingTasks: Story = {
 		const canvas = within(canvasElement);
 
 		await step("Select the first AI template", async () => {
-			const form = await canvas.findByRole("form");
-			const combobox = await within(form).findByRole("combobox");
+			const combobox = await canvas.findByRole("combobox");
 			expect(combobox).toHaveTextContent(MockTemplate.display_name);
 		});
 	},
@@ -106,40 +94,37 @@ export const LoadedTasks: Story = {
 	},
 };
 
-const newTaskData = {
-	prompt: "Create a new task",
-	workspace: {
-		...MockWorkspace,
-		id: "workspace-4",
-		latest_app_status: {
-			...MockWorkspaceAppStatus,
-			message: "Task created successfully!",
-		},
-	},
-};
-
 export const CreateTaskSuccessfully: Story = {
 	decorators: [withProxyProvider()],
 	beforeEach: () => {
 		spyOn(data, "fetchAITemplates").mockResolvedValue([MockTemplate]);
-		spyOn(data, "fetchTasks")
-			.mockResolvedValueOnce(MockTasks)
-			.mockResolvedValue([newTaskData, ...MockTasks]);
-		spyOn(data, "createTask").mockResolvedValue(newTaskData);
+		spyOn(data, "fetchTasks").mockResolvedValue(MockTasks);
+		spyOn(data, "createTask").mockImplementation((prompt: string) => {
+			return Promise.resolve({
+				prompt,
+				workspace: {
+					...MockWorkspace,
+					latest_app_status: {
+						...MockWorkspaceAppStatus,
+						message: "Task created successfully!",
+					},
+				},
+			});
+		});
 	},
 	play: async ({ canvasElement, step }) => {
 		const canvas = within(canvasElement);
 
 		await step("Run task", async () => {
 			const prompt = await canvas.findByLabelText(/prompt/i);
-			await userEvent.type(prompt, newTaskData.prompt);
+			await userEvent.type(prompt, "Create a new task");
 			const submitButton = canvas.getByRole("button", { name: /run task/i });
 			await userEvent.click(submitButton);
 		});
 
 		await step("Verify task in the table", async () => {
 			await canvas.findByRole("row", {
-				name: new RegExp(newTaskData.prompt, "i"),
+				name: /create a new task/i,
 			});
 		});
 	},
@@ -169,29 +154,6 @@ export const CreateTaskError: Story = {
 
 		await step("Verify error", async () => {
 			await canvas.findByText(/failed to create task/i);
-		});
-	},
-};
-
-export const NonAdmin: Story = {
-	decorators: [withProxyProvider()],
-	parameters: {
-		permissions: {
-			viewDeploymentConfig: false,
-		},
-	},
-	beforeEach: () => {
-		spyOn(data, "fetchAITemplates").mockResolvedValue([MockTemplate]);
-		spyOn(data, "fetchTasks").mockResolvedValue(MockTasks);
-	},
-	play: async ({ canvasElement, step }) => {
-		const canvas = within(canvasElement);
-
-		await step("Can't see filters", async () => {
-			await canvas.findByRole("table");
-			expect(
-				canvas.queryByRole("region", { name: /filters/i }),
-			).not.toBeInTheDocument();
 		});
 	},
 };

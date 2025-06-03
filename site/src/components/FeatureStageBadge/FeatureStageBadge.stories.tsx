@@ -12,30 +12,27 @@ const meta: Meta<typeof FeatureStageBadge> = {
 export default meta;
 type Story = StoryObj<typeof FeatureStageBadge>;
 
-export const SmallBeta: Story = {
-	args: {
-		size: "sm",
-		contentType: "beta",
-	},
-};
-
 export const MediumBeta: Story = {
 	args: {
 		size: "md",
-		contentType: "beta",
 	},
 };
 
-export const SmallEarlyAccess: Story = {
+export const SmallBeta: Story = {
 	args: {
 		size: "sm",
-		contentType: "early_access",
 	},
 };
 
-export const MediumEarlyAccess: Story = {
+export const LargeBeta: Story = {
+	args: {
+		size: "lg",
+	},
+};
+
+export const MediumExperimental: Story = {
 	args: {
 		size: "md",
-		contentType: "early_access",
+		contentType: "experimental",
 	},
 };

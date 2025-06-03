@@ -280,9 +280,16 @@ func (k hardLimitedPresetKey) String() string {
 	return fmt.Sprintf("%s:%s:%s", k.orgName, k.templateName, k.presetName)
 }
 
-func (mc *MetricsCollector) registerHardLimitedPresets(isPresetHardLimited map[hardLimitedPresetKey]bool) {
+// nolint:revive // isHardLimited determines if the preset should be reported as hard-limited in Prometheus.
+func (mc *MetricsCollector) trackHardLimitedStatus(orgName, templateName, presetName string, isHardLimited bool) {
 	mc.isPresetHardLimitedMu.Lock()
 	defer mc.isPresetHardLimitedMu.Unlock()
 
-	mc.isPresetHardLimited = isPresetHardLimited
+	key := hardLimitedPresetKey{orgName: orgName, templateName: templateName, presetName: presetName}
+
+	if isHardLimited {
+		mc.isPresetHardLimited[key] = true
+	} else {
+		delete(mc.isPresetHardLimited, key)
+	}
 }

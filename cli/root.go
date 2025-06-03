@@ -1060,12 +1060,11 @@ func cliHumanFormatError(from string, err error, opts *formatOpts) (string, bool
 		return formatRunCommandError(cmdErr, opts), true
 	}
 
-	if uw, ok := err.(interface{ Unwrap() error }); ok {
-		if unwrapped := uw.Unwrap(); unwrapped != nil {
-			msg, special := cliHumanFormatError(from+traceError(err), unwrapped, opts)
-			if special {
-				return msg, special
-			}
+	uw, ok := err.(interface{ Unwrap() error })
+	if ok {
+		msg, special := cliHumanFormatError(from+traceError(err), uw.Unwrap(), opts)
+		if special {
+			return msg, special
 		}
 	}
 	// If we got here, that means that the wrapped error chain does not have
