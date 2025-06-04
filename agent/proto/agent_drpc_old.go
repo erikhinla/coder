@@ -49,6 +49,8 @@ type DRPCAgentClient24 interface {
 	GetResourcesMonitoringConfiguration(ctx context.Context, in *GetResourcesMonitoringConfigurationRequest) (*GetResourcesMonitoringConfigurationResponse, error)
 	PushResourcesMonitoringUsage(ctx context.Context, in *PushResourcesMonitoringUsageRequest) (*PushResourcesMonitoringUsageResponse, error)
 	ReportConnection(ctx context.Context, in *ReportConnectionRequest) (*emptypb.Empty, error)
+	// TODO: move to DRPCAgentClient25
+	WaitForReinitialize(ctx context.Context, in *WaitForReinitializeRequest) (*ReinitializeResponse, error)
 }
 
 // DRPCAgentClient25 is the Agent API at v2.5.

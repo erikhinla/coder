@@ -108,6 +108,12 @@ message WorkspaceAgentDevcontainer {
 
 message GetManifestRequest {}
 
+message WaitForReinitializeRequest {}
+message ReinitializeResponse{
+	// TODO: depending on applicable timeouts, we might need:
+	// bool should_reinitialize
+}
+
 message ServiceBanner {
 	bool enabled = 1;
 	string message = 2;
@@ -379,6 +385,9 @@ message ReportConnectionRequest {
 
 service Agent {
 	rpc GetManifest(GetManifestRequest) returns (Manifest);
+	// WaitForReinitialize opens a long-polling request and waits for the instruction to
+	// fetch and use a new configuration without terminating its connection.
+	rpc WaitForReinitialize(WaitForReinitializeRequest) returns (ReinitializeResponse);
 	rpc GetServiceBanner(GetServiceBannerRequest) returns (ServiceBanner);
 	rpc UpdateStats(UpdateStatsRequest) returns (UpdateStatsResponse);
 	rpc UpdateLifecycle(UpdateLifecycleRequest) returns (Lifecycle);
