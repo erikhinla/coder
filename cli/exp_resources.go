@@ -98,7 +98,7 @@ func (r *RootCmd) dumpBuildInfoCmd() *serpent.Command {
 				return xerrors.Errorf("open output file: %w", err)
 			}
 
-			builds, err := listBuilds(ctx, logger, sqlDB, fromTime, toTime)
+			builds, err := listBuilds(ctx, sqlDB, fromTime, toTime)
 			if err != nil {
 				return xerrors.Errorf("list workspace builds: %w", err)
 			}
@@ -227,18 +227,20 @@ func (r *RootCmd) trackUsageCmd() *serpent.Command {
 			if r.verbose {
 				log = log.Leveled(slog.LevelDebug)
 			}
-			tracker := make(ResourceUsageTracker)
-			allEvents := make([]ResourceUsageEvent, 0)
-			for _, build := range builds {
+			tracker := NewResourceUsageTracker(time.Hour)
+			for idx, build := range builds {
 				if foundEvents, err := tracker.Track(i.Context(), log, build); err != nil {
+					cliui.Infof(i.Stderr, "Tracked %d resource usage events for build %d of %d", len(foundEvents), idx+1, len(builds))
 					return xerrors.Errorf("track resources for build %s: %w", build.WorkspaceBuildID, err)
-				} else {
-					allEvents = append(allEvents, foundEvents...)
+				} else if err := eventWriter(i.Context(), foundEvents...); err != nil {
+					return xerrors.Errorf("write resource usage events for build %d of %d: %w", idx+1, len(builds), err)
 				}
 			}
-			cliui.Infof(i.Stderr, "Tracked %d resource usage events for %d builds\n", len(allEvents), len(builds))
-			if err := eventWriter(i.Context(), allEvents...); err != nil {
-				return xerrors.Errorf("write resource usage events: %w", err)
+			if rem := tracker.Remainder(time.Now()); len(rem) > 0 {
+				cliui.Infof(i.Stderr, "Writing %d remaining resource usage events", len(rem))
+				if err := eventWriter(i.Context(), tracker.Remainder(time.Now())...); err != nil {
+					return xerrors.Errorf("write remaining resource usage events: %w", err)
+				}
 			}
 			return nil
 		},
@@ -324,11 +326,10 @@ func convertWorkspaceBuildInfoToIntermediateTrackedResourceUsage(ctx context.Con
 	var state tfstate
 	br := bytes.NewReader(lbr.WorkspaceBuildState)
 	if err := json.NewDecoder(br).Decode(&state); err != nil {
-		if errors.Is(err, io.EOF) {
-			log.Warn(ctx, "empty state, assuming no resources")
-		} else {
+		if !errors.Is(err, io.EOF) {
 			return nil, xerrors.Errorf("unmarshal workspace build state: %w", err)
 		}
+		log.Warn(ctx, "empty state, assuming no resources")
 	}
 
 	if lbr.JobCompletedAt.IsZero() {
@@ -390,7 +391,7 @@ func convertWorkspaceBuildInfoToIntermediateTrackedResourceUsage(ctx context.Con
 
 			for _, q := range quantities {
 				ret = append(ret, intermediateTrackedResourceUsage{
-					Start:             lbr.JobStartedAt.UTC(),
+					Start:             lbr.JobCompletedAt.UTC(),
 					UserID:            lbr.UserID,
 					UserName:          lbr.UserName,
 					WorkspaceID:       lbr.WorkspaceID,
@@ -413,10 +414,24 @@ func convertWorkspaceBuildInfoToIntermediateTrackedResourceUsage(ctx context.Con
 }
 
 // ResourceUsageTracker accumulates resource usage times for workspaces.
-// It is fundamentally a map of workspace IDs to a map of tracked resource usages.
-type ResourceUsageTracker map[uuid.UUID]map[intermediateTrackedResourceUsage]struct{}
+type ResourceUsageTracker struct {
+	Interval  time.Duration
+	resources map[uuid.UUID]map[intermediateTrackedResourceUsage]time.Time
+}
 
-func (r ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr WorkspaceBuildInfo) ([]ResourceUsageEvent, error) {
+// NewResourceUsageTracker creates a new tracker with the given interval (or time.Hour if zero).
+func NewResourceUsageTracker(interval time.Duration) *ResourceUsageTracker {
+	if interval == 0 {
+		interval = time.Hour
+	}
+	return &ResourceUsageTracker{
+		Interval:  interval,
+		resources: make(map[uuid.UUID]map[intermediateTrackedResourceUsage]time.Time),
+	}
+}
+
+// Track processes a build info and emits interval events for removed resources.
+func (r *ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr WorkspaceBuildInfo) ([]ResourceUsageEvent, error) {
 	log = log.With(
 		slog.F("workspace_id", lbr.WorkspaceID),
 		slog.F("workspace_name", lbr.WorkspaceName),
@@ -435,7 +450,11 @@ func (r ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr Wo
 	var events []ResourceUsageEvent
 	var added, removed []intermediateTrackedResourceUsage
 
-	log.Debug(ctx, "known resources", slog.F("count", len(r[lbr.WorkspaceID])))
+	if r.resources == nil {
+		r.resources = make(map[uuid.UUID]map[intermediateTrackedResourceUsage]time.Time)
+	}
+
+	log.Debug(ctx, "known resources", slog.F("count", len(r.resources[lbr.WorkspaceID])))
 	inters, err := convertWorkspaceBuildInfoToIntermediateTrackedResourceUsage(ctx, log, lbr)
 	if err != nil {
 		return nil, xerrors.Errorf("convert workspace build info to intermediate tracked resource usage: %w", err)
@@ -443,56 +462,54 @@ func (r ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr Wo
 	log.Debug(ctx, "resources found in state", slog.F("count", len(inters)))
 
 	// Have we seen this workspace before? If not, initialize the map.
-	_, alreadySeen := r[lbr.WorkspaceID]
+	_, alreadySeen := r.resources[lbr.WorkspaceID]
 
-	// If this is the first time we see this workspace, we should assume that all
-	// resources are new and being added. We don't do this for a delete
-	// transition.
 	if !alreadySeen {
 		log.Debug(ctx, "initializing workspace in tracker", slog.F("workspace_id", lbr.WorkspaceID))
-		r[lbr.WorkspaceID] = make(map[intermediateTrackedResourceUsage]struct{})
-		switch lbr.WorkspaceBuildTransition {
-		case "stop":
-			log.Warn(ctx, "workspace is new to us but transition is stop, we may be missing resources")
-		case "delete":
-			log.Warn(ctx, "workspace is new to us but transition is delete, not adding resources")
-			return []ResourceUsageEvent{}, nil
-		case "start":
-			log.Debug(ctx, "workspace is new to us, adding all resources")
-		default:
-			return nil, xerrors.Errorf("unknown workspace build transition: %s", lbr.WorkspaceBuildTransition)
-		}
+		r.resources[lbr.WorkspaceID] = make(map[intermediateTrackedResourceUsage]time.Time)
 		for _, inter := range inters {
-			log.Debug(ctx, "adding all resources", slog.F("resource_id", inter.ResourceID), slog.F("resource_type", inter.ResourceType), slog.F("resource_name", inter.ResourceName))
-			added = append(added, inter)
-			r[lbr.WorkspaceID][inter] = struct{}{}
+			r.resources[lbr.WorkspaceID][inter] = lbr.JobStartedAt.UTC()
 		}
-		// There will be no events to return for this build.
-		return []ResourceUsageEvent{}, nil
+		return nil, nil
 	}
 
-	// We have previously seen this workspace!
-	if lbr.WorkspaceBuildTransition == "delete" {
-		// All resources are removed when the workspace is deleted (theoretically).
-		added = []intermediateTrackedResourceUsage{}
-		removed = maps.Keys(r[lbr.WorkspaceID])
-	} else {
-		// Find the set of added and removed resources.
-		added, removed = slice.SymmetricDifferenceFunc(maps.Keys(r[lbr.WorkspaceID]), inters, func(a, b intermediateTrackedResourceUsage) bool {
-			// Compare the resource ID, type, and name to determine if they are the same.
-			return a.ResourceID == b.ResourceID && a.ResourceType == b.ResourceType && a.ResourceName == b.ResourceName
-		})
-	}
+	// Find added and removed resources (by ID/type/name/unit).
+	prev := r.resources[lbr.WorkspaceID]
+	prevKeys := maps.Keys(prev)
+	added, removed = slice.SymmetricDifferenceFunc(prevKeys, inters, func(a, b intermediateTrackedResourceUsage) bool {
+		return a.ResourceID == b.ResourceID && a.ResourceType == b.ResourceType && a.ResourceName == b.ResourceName && a.ResourceUnit == b.ResourceUnit
+	})
+
 	log.Debug(ctx, "added resources", slog.F("count", len(added)))
 	log.Debug(ctx, "removed resources", slog.F("count", len(removed)))
 
-	// Emit an event for each removed resource.
+	// Add new resources with their start time.
+	for _, inter := range added {
+		prev[inter] = lbr.JobCompletedAt.UTC()
+	}
+
+	// For each removed resource, emit interval events and delete from tracker.
 	for _, inter := range removed {
-		events = append(events, inter.ToEvent(lbr.JobCompletedAt.UTC()))
+		start := prev[inter]
+		end := lbr.JobCompletedAt.UTC()
+		dur := end.Sub(start)
+		intervals := int(dur / r.Interval)
+		for i := range intervals {
+			evt := inter.ToEvent(start.Add(time.Duration(i) * r.Interval))
+			evt.DurationSeconds = decimal.New(r.Interval.Microseconds(), -6)
+			events = append(events, evt)
+		}
+		remainder := dur % r.Interval
+		if remainder > 0 {
+			evt := inter.ToEvent(end)
+			evt.Time = end.Add(-remainder)
+			evt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
+			events = append(events, evt)
+		}
+		delete(prev, inter)
 	}
 
 	slices.SortFunc(events, func(a, b ResourceUsageEvent) int {
-		// Sort by time, then by resource type.
 		if cmp := a.Time.Compare(b.Time); cmp != 0 {
 			return cmp
 		}
@@ -502,37 +519,35 @@ func (r ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr Wo
 	return events, nil
 }
 
-// Terraform recommends against using tfjson directly, and instead defining
-// a custom struct for the resources we care about.
-type tfstate struct {
-	Resources []tfstateResource
-}
-
-type tfstateResource struct {
-	Mode      string                    `json:"mode"`
-	Type      string                    `json:"type"`
-	Name      string                    `json:"name"`
-	Provider  string                    `json:"provider"`
-	Instances []tfstateResourceInstance `json:"instances"`
-}
-
-type tfstateResourceInstance struct {
-	Attributes map[string]any `json:"attributes"`
-}
-
-func (i tfstateResourceInstance) ID() (string, error) {
-	// TODO: make this not have to marshal and unmarshal the attributes.
-	bs, err := json.Marshal(i.Attributes)
-	if err != nil {
-		return "", xerrors.Errorf("marshal resource attributes: %w", err)
+// Remainder emits interval events for all currently tracked resources up to the given time.
+func (r *ResourceUsageTracker) Remainder(now time.Time) []ResourceUsageEvent {
+	var events []ResourceUsageEvent
+	for _, resmap := range r.resources {
+		for inter, start := range resmap {
+			dur := now.Sub(start)
+			intervals := int(dur / r.Interval)
+			for i := 0; i < intervals; i++ {
+				evt := inter.ToEvent(start.Add(time.Duration(i+1) * r.Interval))
+				evt.Time = start.Add(time.Duration(i) * r.Interval)
+				evt.DurationSeconds = decimal.New(r.Interval.Microseconds(), -6)
+				events = append(events, evt)
+			}
+			remainder := dur % r.Interval
+			if remainder > 0 {
+				evt := inter.ToEvent(now)
+				evt.Time = now.Add(-remainder)
+				evt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
+				events = append(events, evt)
+			}
+		}
 	}
-	tmp := &struct {
-		ID string `json:"id"`
-	}{}
-	if err := json.Unmarshal(bs, &tmp); err != nil {
-		return "", err
-	}
-	return tmp.ID, nil
+	slices.SortFunc(events, func(a, b ResourceUsageEvent) int {
+		if cmp := a.Time.Compare(b.Time); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ResourceType, b.ResourceType)
+	})
+	return events
 }
 
 type ResourceUsageEvent struct {
@@ -810,7 +825,7 @@ ORDER BY
 	pj.completed_at ASC
 ;`
 
-func listBuilds(ctx context.Context, logger slog.Logger, sqlDB *sql.DB, fromTime, toTime codersdk.NullTime) ([]WorkspaceBuildInfo, error) {
+func listBuilds(ctx context.Context, sqlDB *sql.DB, fromTime, toTime codersdk.NullTime) ([]WorkspaceBuildInfo, error) {
 	rows, err := sqlDB.QueryContext(ctx, queryListBuilds, fromTime, toTime)
 	if err != nil {
 		return nil, xerrors.Errorf("query workspace builds: %w", err)
@@ -1055,4 +1070,35 @@ var defaultResourceUsageExtractors = map[string][]resourceUsageExtractor{
 			Convert: convertDefault,
 		},
 	},
+}
+
+type tfstate struct {
+	Resources []tfstateResource
+}
+
+type tfstateResource struct {
+	Mode      string                    `json:"mode"`
+	Type      string                    `json:"type"`
+	Name      string                    `json:"name"`
+	Provider  string                    `json:"provider"`
+	Instances []tfstateResourceInstance `json:"instances"`
+}
+
+type tfstateResourceInstance struct {
+	Attributes map[string]any `json:"attributes"`
+}
+
+func (i tfstateResourceInstance) ID() (string, error) {
+	// TODO: make this not have to marshal and unmarshal the attributes.
+	bs, err := json.Marshal(i.Attributes)
+	if err != nil {
+		return "", xerrors.Errorf("marshal resource attributes: %w", err)
+	}
+	tmp := &struct {
+		ID string `json:"id"`
+	}{}
+	if err := json.Unmarshal(bs, &tmp); err != nil {
+		return "", err
+	}
+	return tmp.ID, nil
 }
