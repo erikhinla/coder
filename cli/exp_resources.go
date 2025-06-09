@@ -175,7 +175,8 @@ func (r *RootCmd) dumpBuildInfoCmd() *serpent.Command {
 
 func (r *RootCmd) trackUsageCmd() *serpent.Command {
 	var (
-		destURL string
+		destURL         string
+		explodeInterval time.Duration
 	)
 	cmd := &serpent.Command{
 		Use:   "track-usage <input.csv>",
@@ -227,7 +228,7 @@ func (r *RootCmd) trackUsageCmd() *serpent.Command {
 			if r.verbose {
 				log = log.Leveled(slog.LevelDebug)
 			}
-			tracker := NewResourceUsageTracker(time.Hour)
+			tracker := NewResourceUsageTracker(explodeInterval)
 			for idx, build := range builds {
 				if foundEvents, err := tracker.Track(i.Context(), log, build); err != nil {
 					cliui.Infof(i.Stderr, "Tracked %d resource usage events for build %d of %d", len(foundEvents), idx+1, len(builds))
@@ -252,6 +253,13 @@ func (r *RootCmd) trackUsageCmd() *serpent.Command {
 				Flag:        "dest-url",
 				Default:     "",
 				Value:       serpent.StringOf(&destURL),
+			},
+			{
+				Name:        "explode-interval",
+				Description: "Explode resource usage events into intervals. Not enabled by default (0).",
+				Flag:        "explode-interval",
+				Default:     "0",
+				Value:       serpent.DurationOf(&explodeInterval),
 			},
 		},
 	}
@@ -421,8 +429,8 @@ type ResourceUsageTracker struct {
 
 // NewResourceUsageTracker creates a new tracker with the given interval (or time.Hour if zero).
 func NewResourceUsageTracker(interval time.Duration) *ResourceUsageTracker {
-	if interval == 0 {
-		interval = time.Hour
+	if interval < 0 {
+		panic("interval must be non-negative")
 	}
 	return &ResourceUsageTracker{
 		Interval:  interval,
@@ -468,7 +476,7 @@ func (r *ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr W
 		log.Debug(ctx, "initializing workspace in tracker", slog.F("workspace_id", lbr.WorkspaceID))
 		r.resources[lbr.WorkspaceID] = make(map[intermediateTrackedResourceUsage]time.Time)
 		for _, inter := range inters {
-			r.resources[lbr.WorkspaceID][inter] = lbr.JobStartedAt.UTC()
+			r.resources[lbr.WorkspaceID][inter] = lbr.JobCompletedAt.UTC()
 		}
 		return nil, nil
 	}
@@ -490,22 +498,9 @@ func (r *ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr W
 
 	// For each removed resource, emit interval events and delete from tracker.
 	for _, inter := range removed {
-		start := prev[inter]
 		end := lbr.JobCompletedAt.UTC()
-		dur := end.Sub(start)
-		intervals := int(dur / r.Interval)
-		for i := range intervals {
-			evt := inter.ToEvent(start.Add(time.Duration(i) * r.Interval))
-			evt.DurationSeconds = decimal.New(r.Interval.Microseconds(), -6)
-			events = append(events, evt)
-		}
-		remainder := dur % r.Interval
-		if remainder > 0 {
-			evt := inter.ToEvent(end)
-			evt.Time = end.Add(-remainder)
-			evt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
-			events = append(events, evt)
-		}
+		evt := inter.ToEvent(end)
+		events = append(events, Explode(r.Interval, evt)...)
 		delete(prev, inter)
 	}
 
@@ -523,22 +518,9 @@ func (r *ResourceUsageTracker) Track(ctx context.Context, log slog.Logger, lbr W
 func (r *ResourceUsageTracker) Remainder(now time.Time) []ResourceUsageEvent {
 	var events []ResourceUsageEvent
 	for _, resmap := range r.resources {
-		for inter, start := range resmap {
-			dur := now.Sub(start)
-			intervals := int(dur / r.Interval)
-			for i := 0; i < intervals; i++ {
-				evt := inter.ToEvent(start.Add(time.Duration(i+1) * r.Interval))
-				evt.Time = start.Add(time.Duration(i) * r.Interval)
-				evt.DurationSeconds = decimal.New(r.Interval.Microseconds(), -6)
-				events = append(events, evt)
-			}
-			remainder := dur % r.Interval
-			if remainder > 0 {
-				evt := inter.ToEvent(now)
-				evt.Time = now.Add(-remainder)
-				evt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
-				events = append(events, evt)
-			}
+		for inter := range resmap {
+			evt := inter.ToEvent(now)
+			events = append(events, Explode(r.Interval, evt)...)
 		}
 	}
 	slices.SortFunc(events, func(a, b ResourceUsageEvent) int {
@@ -548,6 +530,42 @@ func (r *ResourceUsageTracker) Remainder(now time.Time) []ResourceUsageEvent {
 		return strings.Compare(a.ResourceType, b.ResourceType)
 	})
 	return events
+}
+
+func Explode(interval time.Duration, evt ResourceUsageEvent) []ResourceUsageEvent {
+	if interval <= 0 {
+		return []ResourceUsageEvent{evt}
+	}
+	exploded := make([]ResourceUsageEvent, 0)
+	// Calculate the number of intervals in the duration
+	durSecs, _ := evt.DurationSeconds.Float64()
+	dur := time.Duration(durSecs * float64(time.Second))
+	start := evt.Time.Add(-dur)
+	intervals := int(dur / interval)
+	for i := range intervals {
+		// Create a new event for each interval
+		newEvt := evt
+		newEvt.Time = start.Add(time.Duration(i) * interval)
+		// Adjust the duration to be the length of the interval
+		newEvt.DurationSeconds = decimal.New(interval.Microseconds(), -6)
+		exploded = append(exploded, newEvt)
+	}
+	// If there's a remainder, create an event for that too
+	remainder := dur % interval
+	if remainder > 0 {
+		newEvt := evt
+		newEvt.Time = start.Add(time.Duration(intervals) * interval)
+		newEvt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
+		exploded = append(exploded, newEvt)
+	}
+	// Sort the events by time and resource type
+	slices.SortFunc(exploded, func(a, b ResourceUsageEvent) int {
+		if cmp := a.Time.Compare(b.Time); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ResourceType, b.ResourceType)
+	})
+	return exploded
 }
 
 type ResourceUsageEvent struct {

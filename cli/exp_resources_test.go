@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
@@ -17,12 +18,11 @@ import (
 	"cdr.dev/slog"
 	"cdr.dev/slog/sloggers/slogtest"
 	"github.com/coder/coder/v2/cli"
-	"github.com/coder/coder/v2/testutil"
 )
 
-var expectedEvents = explode(time.Hour, []cli.ResourceUsageEvent{
+var expectedEvents = []cli.ResourceUsageEvent{
 	{
-		Time:              time.Date(2024, 5, 9, 12, 35, 11, 33732000, time.UTC),
+		Time:              time.Date(2024, 5, 8, 12, 35, 11, 33732000, time.UTC),
 		UserName:          "cian",
 		UserID:            uuid.MustParse("17c2bcbc-a768-4e99-a726-6980a9e5524a"),
 		TemplateName:      "kubernetes",
@@ -35,14 +35,14 @@ var expectedEvents = explode(time.Hour, []cli.ResourceUsageEvent{
 		ResourceName:      "main",
 		ResourceType:      "kubernetes_deployment",
 		ResourceUnit:      "cpu_cores",
-		ResourceQuantity:  decimal.New(25, -2),          // 0.25 cores
-		DurationSeconds:   decimal.New(86465217444, -6), // 1 day and 65.21744 seconds
+		ResourceQuantity:  decimal.New(25, -2),
+		DurationSeconds:   decimal.New(57632564, -6),
 		Attributes: map[string]string{
 			"namespace": "coder",
 		},
 	},
 	{
-		Time:              time.Date(2024, 5, 9, 12, 35, 11, 33732000, time.UTC),
+		Time:              time.Date(2024, 5, 8, 12, 35, 11, 33732000, time.UTC),
 		UserName:          "cian",
 		UserID:            uuid.MustParse("17c2bcbc-a768-4e99-a726-6980a9e5524a"),
 		TemplateName:      "kubernetes",
@@ -55,14 +55,14 @@ var expectedEvents = explode(time.Hour, []cli.ResourceUsageEvent{
 		ResourceName:      "main",
 		ResourceType:      "kubernetes_deployment",
 		ResourceUnit:      "memory_bytes",
-		ResourceQuantity:  decimal.New(512*1024*1024, 0), // 512 MiB
-		DurationSeconds:   decimal.New(86465217444, -6),  // 1 day and 65.21744 seconds
+		ResourceQuantity:  decimal.New(512*1024*1024, 0),
+		DurationSeconds:   decimal.New(57632564, -6),
 		Attributes: map[string]string{
 			"namespace": "coder",
 		},
 	},
 	{
-		Time:              time.Date(2024, 5, 9, 12, 35, 11, 33732000, time.UTC),
+		Time:              time.Date(2024, 5, 8, 12, 35, 11, 33732000, time.UTC),
 		UserName:          "cian",
 		UserID:            uuid.MustParse("17c2bcbc-a768-4e99-a726-6980a9e5524a"),
 		TemplateName:      "kubernetes",
@@ -75,49 +75,84 @@ var expectedEvents = explode(time.Hour, []cli.ResourceUsageEvent{
 		ResourceName:      "home",
 		ResourceType:      "kubernetes_persistent_volume_claim",
 		ResourceUnit:      "disk_bytes",
-		ResourceQuantity:  decimal.New(1*1024*1024*1024, 1), // 1 GiB
-		DurationSeconds:   decimal.New(86465217444, -6),     // 1 day and 65.21744 seconds
+		ResourceQuantity:  decimal.New(1*1024*1024*1024, 1),
+		DurationSeconds:   decimal.New(57632564, -6),
 		Attributes: map[string]string{
 			"namespace":     "coder",
 			"storage_class": "",
 		},
 	},
-}...)
+}
 
 func TestExpResources_TrackUsage(t *testing.T) {
 	t.Parallel()
-
-	ctx := testutil.Context(t, testutil.WaitShort)
 	log := slogtest.Make(t, nil).Leveled(slog.LevelDebug)
 	f, err := os.Open("testdata/exp_resources_track_usage.csv.golden")
 	require.NoError(t, err)
-	defer f.Close()
+	t.Cleanup(func() {
+		assert.NoError(t, f.Close())
+	})
 	wr := cli.WorkspaceBuildInfoCSVReader{R: f}
 	builds, err := wr.Read()
 	require.NoError(t, err)
 	require.Len(t, builds, 2)
-	rt := cli.NewResourceUsageTracker(time.Hour)
 
-	actualEvents := make([]cli.ResourceUsageEvent, 0)
-	for _, b := range builds {
-		evts, err := rt.Track(ctx, log, b)
-		require.NoError(t, err)
-		actualEvents = append(actualEvents, evts...)
+	require.Len(t, expectedEvents, 3)
+	expectedEventsExploded := make([]cli.ResourceUsageEvent, 0)
+	for _, e := range expectedEvents {
+		expectedEventsExploded = append(expectedEventsExploded, cli.Explode(30*time.Second, e)...)
 	}
+	slices.SortFunc(expectedEventsExploded, func(a, b cli.ResourceUsageEvent) int {
+		if cmp := a.Time.Compare(b.Time); cmp != 0 {
+			return cmp
+		}
+		return strings.Compare(a.ResourceType, b.ResourceType)
+	})
+	require.Len(t, expectedEventsExploded, 6, "Expected 6 exploded events, got %d", len(expectedEventsExploded))
 
-	if assert.Equal(t, len(expectedEvents), len(actualEvents)) {
-		for idx, event := range actualEvents {
-			if diff := cmp.Diff(expectedEvents[idx], event); diff != "" {
-				t.Errorf("Track() mismatch for event %d/%d (-want +got):\n%s", idx+1, len(actualEvents), diff)
+	t.Run("NonExploded", func(t *testing.T) {
+		t.Parallel()
+
+		rt := cli.NewResourceUsageTracker(0)
+		actualEvents := make([]cli.ResourceUsageEvent, 0)
+		for _, b := range builds {
+			evts, err := rt.Track(context.Background(), log, b)
+			require.NoError(t, err)
+			actualEvents = append(actualEvents, evts...)
+		}
+
+		if assert.Equal(t, len(expectedEvents), len(actualEvents)) {
+			for idx, event := range actualEvents {
+				if diff := cmp.Diff(expectedEvents[idx], event); diff != "" {
+					t.Errorf("Track() mismatch for event %d/%d (-want +got):\n%s", idx+1, len(actualEvents), diff)
+				}
 			}
 		}
-	}
 
-	if diff := cmp.Diff(expectedEvents, actualEvents); diff != "" {
-		t.Errorf("Track() mismatch (-want +got):\n%s", diff)
-	}
+		assert.Empty(t, rt.Remainder(time.Now()), "Expected no remaining events after processing all builds")
+	})
 
-	assert.Empty(t, rt.Remainder(time.Now()), "Expected no remaining events after processing all builds")
+	t.Run("Exploded", func(t *testing.T) {
+		t.Parallel()
+
+		rt := cli.NewResourceUsageTracker(30 * time.Second)
+		actualEvents := make([]cli.ResourceUsageEvent, 0)
+		for _, b := range builds {
+			evts, err := rt.Track(context.Background(), log, b)
+			require.NoError(t, err)
+			actualEvents = append(actualEvents, evts...)
+		}
+
+		if assert.Equal(t, len(expectedEventsExploded), len(actualEvents)) {
+			for idx, event := range actualEvents {
+				if diff := cmp.Diff(expectedEventsExploded[idx], event); diff != "" {
+					t.Errorf("Track() mismatch for event %d/%d (-want +got):\n%s", idx+1, len(actualEvents), diff)
+				}
+			}
+		}
+
+		assert.Empty(t, rt.Remainder(time.Now()), "Expected no remaining events after processing all builds")
+	})
 }
 
 func TestConvertSIString(t *testing.T) {
@@ -164,39 +199,4 @@ func TestConvertSIString(t *testing.T) {
 			}
 		})
 	}
-}
-
-func explode(interval time.Duration, evts ...cli.ResourceUsageEvent) []cli.ResourceUsageEvent {
-	exploded := make([]cli.ResourceUsageEvent, 0)
-	for _, evt := range evts {
-		// Calculate the number of intervals in the duration
-		durSecs, _ := evt.DurationSeconds.Float64()
-		dur := time.Duration(durSecs * float64(time.Second))
-		start := evt.Time.Add(-dur)
-		intervals := int(dur / interval)
-		for i := range intervals {
-			// Create a new event for each interval
-			newEvt := evt
-			newEvt.Time = start.Add(time.Duration(i) * interval)
-			// Adjust the duration to be the length of the interval
-			newEvt.DurationSeconds = decimal.New(interval.Microseconds(), -6)
-			exploded = append(exploded, newEvt)
-		}
-		// If there's a remainder, create an event for that too
-		remainder := dur % interval
-		if remainder > 0 {
-			newEvt := evt
-			newEvt.Time = start.Add(time.Duration(intervals) * interval)
-			newEvt.DurationSeconds = decimal.New(remainder.Microseconds(), -6)
-			exploded = append(exploded, newEvt)
-		}
-	}
-	// Sort the events by time
-	slices.SortFunc(exploded, func(a, b cli.ResourceUsageEvent) int {
-		if cmp := a.Time.Compare(b.Time); cmp != 0 {
-			return cmp
-		}
-		return strings.Compare(a.ResourceType, b.ResourceType)
-	})
-	return exploded
 }
