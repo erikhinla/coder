@@ -784,6 +784,49 @@ func TestUpdateJob(t *testing.T) {
 
 		<-published
 	})
+	t.Run("LogSizeLimit", func(t *testing.T) {
+		t.Parallel()
+		srv, db, _, pd := setup(t, false, &overrides{
+			ProvisionerLogSizeLimit: 100, // Set a small limit for testing
+		})
+		job := setupJob(t, db, pd.ID, pd.Tags)
+
+		// First, add some logs that are within the limit
+		_, err := srv.UpdateJob(ctx, &proto.UpdateJobRequest{
+			JobId: job.String(),
+			Logs: []*proto.Log{{
+				Source: proto.LogSource_PROVISIONER,
+				Level:  sdkproto.LogLevel_INFO,
+				Output: "small log", // 9 bytes
+			}},
+		})
+		require.NoError(t, err)
+
+		// Now try to add logs that would exceed the limit
+		largeLog := strings.Repeat("x", 200) // 200 bytes, which would exceed our 100 byte limit
+		_, err = srv.UpdateJob(ctx, &proto.UpdateJobRequest{
+			JobId: job.String(),
+			Logs: []*proto.Log{{
+				Source: proto.LogSource_PROVISIONER,
+				Level:  sdkproto.LogLevel_INFO,
+				Output: largeLog,
+			}},
+		})
+		// The job should not fail, even though logs exceed the limit
+		require.NoError(t, err)
+
+		// Verify that a warning message was inserted
+		logs, err := db.GetProvisionerLogsAfterID(ctx, database.GetProvisionerLogsAfterIDParams{
+			JobID:        job,
+			CreatedAfter: 0,
+		})
+		require.NoError(t, err)
+		// Should have the original small log and a warning message, but not the large log
+		require.Len(t, logs, 2)
+		require.Equal(t, "small log", logs[0].Output)
+		require.Contains(t, logs[1].Output, "Log size limit")
+		require.Equal(t, database.LogLevelWarn, logs[1].Level)
+	})
 	t.Run("Readme", func(t *testing.T) {
 		t.Parallel()
 		srv, db, _, pd := setup(t, false, &overrides{})
@@ -3369,6 +3412,7 @@ type overrides struct {
 	auditor                     audit.Auditor
 	notificationEnqueuer        notifications.Enqueuer
 	prebuildsOrchestrator       agplprebuilds.ReconciliationOrchestrator
+	ProvisionerLogSizeLimit     int64
 }
 
 func setup(t *testing.T, ignoreLogErrors bool, ov *overrides) (proto.DRPCProvisionerDaemonServer, database.Store, pubsub.Pubsub, database.ProvisionerDaemon) {
@@ -3477,12 +3521,13 @@ func setup(t *testing.T, ignoreLogErrors bool, ov *overrides) (proto.DRPCProvisi
 		uqhss,
 		deploymentValues,
 		provisionerdserver.Options{
-			ExternalAuthConfigs:   externalAuthConfigs,
-			Clock:                 clock,
-			OIDCConfig:            &oauth2.Config{},
-			AcquireJobLongPollDur: pollDur,
-			HeartbeatInterval:     ov.heartbeatInterval,
-			HeartbeatFn:           ov.heartbeatFn,
+			ExternalAuthConfigs:     externalAuthConfigs,
+			Clock:                   clock,
+			OIDCConfig:              &oauth2.Config{},
+			AcquireJobLongPollDur:   pollDur,
+			HeartbeatInterval:       ov.heartbeatInterval,
+			HeartbeatFn:             ov.heartbeatFn,
+			ProvisionerLogSizeLimit: ov.ProvisionerLogSizeLimit,
 		},
 		notifEnq,
 		&op,

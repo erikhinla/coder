@@ -58,6 +58,10 @@ import (
 
 const (
 	tarMimeType = "application/x-tar"
+
+	// DefaultProvisionerLogSizeLimit is the default maximum size of logs
+	// that can be stored for a single provisioner job (1MB).
+	DefaultProvisionerLogSizeLimit = 1024 * 1024
 )
 
 const (
@@ -93,6 +97,10 @@ type Options struct {
 	// The default function just calls UpdateProvisionerDaemonLastSeenAt.
 	// This is mainly used for testing.
 	HeartbeatFn func(context.Context) error
+
+	// ProvisionerLogSizeLimit is the maximum size of logs that can be
+	// stored for a single provisioner job. If 0, DefaultProvisionerLogSizeLimit is used.
+	ProvisionerLogSizeLimit int64
 }
 
 type server struct {
@@ -129,6 +137,8 @@ type server struct {
 
 	heartbeatInterval time.Duration
 	heartbeatFn       func(ctx context.Context) error
+
+	provisionerLogSizeLimit int64
 }
 
 // We use the null byte (0x00) in generating a canonical map key for tags, so
@@ -215,6 +225,9 @@ func NewServer(
 	if options.Clock == nil {
 		options.Clock = quartz.NewReal()
 	}
+	if options.ProvisionerLogSizeLimit == 0 {
+		options.ProvisionerLogSizeLimit = DefaultProvisionerLogSizeLimit
+	}
 
 	s := &server{
 		lifecycleCtx:                lifecycleCtx,
@@ -242,6 +255,7 @@ func NewServer(
 		acquireJobLongPollDur:       options.AcquireJobLongPollDur,
 		heartbeatInterval:           options.HeartbeatInterval,
 		heartbeatFn:                 options.HeartbeatFn,
+		provisionerLogSizeLimit:     options.ProvisionerLogSizeLimit,
 		PrebuildsOrchestrator:       prebuildsOrchestrator,
 	}
 
@@ -902,6 +916,48 @@ func (s *server) UpdateJob(ctx context.Context, request *proto.UpdateJobRequest)
 	}
 
 	if len(request.Logs) > 0 {
+		// Check current log size and calculate new log size
+		currentLogSize, err := s.getProvisionerJobLogSize(ctx, parsedID)
+		if err != nil {
+			s.Logger.Warn(ctx, "failed to get current log size, proceeding anyway", slog.F("job_id", parsedID), slog.Error(err))
+			currentLogSize = 0
+		}
+
+		// Calculate the size of new logs
+		newLogSize := int64(0)
+		for _, log := range request.Logs {
+			newLogSize += int64(len(log.Output))
+		}
+
+		// Check if adding new logs would exceed the limit
+		if currentLogSize+newLogSize > s.provisionerLogSizeLimit {
+			s.Logger.Warn(ctx, "provisioner job logs size limit reached, no more logs will be stored",
+				slog.F("job_id", parsedID),
+				slog.F("current_size", currentLogSize),
+				slog.F("new_size", newLogSize),
+				slog.F("limit", s.provisionerLogSizeLimit))
+
+			// Insert a warning message about the log size limit
+			warningParams := database.InsertProvisionerJobLogsParams{
+				JobID:     parsedID,
+				CreatedAt: []time.Time{s.timeNow()},
+				Level:     []database.LogLevel{database.LogLevelWarn},
+				Stage:     []string{"provisioner"},
+				Source:    []database.LogSource{database.LogSourceProvisionerDaemon},
+				Output:    []string{fmt.Sprintf("Log size limit of %d bytes reached. No more logs will be stored for this job.", s.provisionerLogSizeLimit)},
+			}
+
+			_, err = s.Database.InsertProvisionerJobLogs(ctx, warningParams)
+			if err != nil {
+				s.Logger.Error(ctx, "failed to insert log size warning", slog.F("job_id", parsedID), slog.Error(err))
+			}
+
+			// Skip inserting the actual logs but don't fail the job
+			return &proto.UpdateJobResponse{
+				Canceled: job.CanceledAt.Valid,
+			}, nil
+		}
+
 		//nolint:exhaustruct // We append to the additional fields below.
 		insertParams := database.InsertProvisionerJobLogsParams{
 			JobID: parsedID,
@@ -2778,4 +2834,26 @@ func convertDisplayApps(apps *sdkproto.DisplayApps) []database.DisplayApp {
 		dapps = append(dapps, database.DisplayAppWebTerminal)
 	}
 	return dapps
+}
+
+// getProvisionerJobLogSize calculates the total size of logs for a provisioner job.
+// For now, this is a simple implementation that sums the length of all log outputs.
+// TODO: Replace with database query once GetProvisionerJobLogSize is generated.
+func (s *server) getProvisionerJobLogSize(ctx context.Context, jobID uuid.UUID) (int64, error) {
+	// Get all logs for the job
+	logs, err := s.Database.GetProvisionerLogsAfterID(ctx, database.GetProvisionerLogsAfterIDParams{
+		JobID:        jobID,
+		CreatedAfter: 0,
+	})
+	if err != nil {
+		return 0, xerrors.Errorf("get provisioner logs: %w", err)
+	}
+
+	// Calculate total size
+	totalSize := int64(0)
+	for _, log := range logs {
+		totalSize += int64(len(log.Output))
+	}
+
+	return totalSize, nil
 }

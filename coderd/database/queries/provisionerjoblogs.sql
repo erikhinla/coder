@@ -19,3 +19,11 @@ SELECT
 	unnest(@level :: log_level [ ]) AS LEVEL,
 	unnest(@stage :: VARCHAR(128) [ ]) AS stage,
 	unnest(@output :: VARCHAR(1024) [ ]) AS output RETURNING *;
+
+-- name: GetProvisionerJobLogSize :one
+SELECT
+	COALESCE(SUM(LENGTH(output)), 0) AS total_size
+FROM
+	provisioner_job_logs
+WHERE
+	job_id = @job_id;
