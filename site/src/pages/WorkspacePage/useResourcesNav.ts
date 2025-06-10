@@ -15,23 +15,28 @@ export const resourceOptionValue = (resource: WorkspaceResource) => {
 // robust implementation.
 export const useResourcesNav = (resources: WorkspaceResource[]) => {
 	const resourcesNav = useSearchParamsKey({ key: "resources" });
+	
+	// Get the default resource (first resource with agents) for display purposes
+	// without setting it in the URL
+	const defaultResource = resources.find(
+		(resource) => resource.agents && resource.agents.length > 0
+	);
+	const defaultValue = defaultResource ? resourceOptionValue(defaultResource) : "";
+	
+	// Use URL value if present, otherwise use default for display
+	const currentValue = resourcesNav.value || defaultValue;
+	
 	const isSelected = useCallback(
 		(resource: WorkspaceResource) => {
-			return resourceOptionValue(resource) === resourcesNav.value;
+			return resourceOptionValue(resource) === currentValue;
 		},
-		[resourcesNav.value],
+		[currentValue],
 	);
 
 	const onResourceChanges = useEffectEvent(
 		(resources?: WorkspaceResource[]) => {
-			const hasSelectedResource = resourcesNav.value !== "";
-			const hasResources = resources && resources.length > 0;
-			const hasResourcesWithAgents =
-				hasResources && resources[0].agents && resources[0].agents.length > 0;
-
-			if (!hasSelectedResource && hasResourcesWithAgents) {
-				resourcesNav.setValue(resourceOptionValue(resources[0]));
-			}
+			// No automatic URL parameter setting - resources are selected for display
+			// based on URL parameter if present, or default resource if not
 		},
 	);
 	useEffect(() => {
@@ -48,6 +53,6 @@ export const useResourcesNav = (resources: WorkspaceResource[]) => {
 	return {
 		isSelected,
 		select,
-		value: resourcesNav.value,
+		value: currentValue,
 	};
 };
