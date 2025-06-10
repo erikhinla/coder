@@ -354,6 +354,32 @@ func (p *DBTokenProvider) authorizeRequest(ctx context.Context, roles *rbac.Subj
 		if err == nil {
 			return true, []string{}, nil
 		}
+	case database.AppSharingLevelOrganization:
+		// Check if the user is in the same organization as the workspace.
+		// This allows all authenticated users in the template's organization to access the app.
+		userID, err := uuid.Parse(roles.ID)
+		if err != nil {
+			// Invalid user ID, deny access
+			break
+		}
+		userOrgs, err := p.Database.GetOrganizationsByUserID(ctx, database.GetOrganizationsByUserIDParams{
+			UserID:  userID,
+			Deleted: sql.NullBool{Valid: true, Bool: false},
+		})
+		if err != nil {
+			// Error getting user organizations, deny access
+			break
+		}
+		for _, org := range userOrgs {
+			if org.ID == dbReq.Workspace.OrganizationID {
+				// User is in the same organization, check scopes
+				err := p.Authorizer.Authorize(ctx, *roles, rbacAction, rbacResourceOwned)
+				if err == nil {
+					return true, []string{}, nil
+				}
+				break
+			}
+		}
 	case database.AppSharingLevelPublic:
 		// We don't really care about scopes and stuff if it's public anyways.
 		// Someone with a restricted-scope API key could just not submit the API
