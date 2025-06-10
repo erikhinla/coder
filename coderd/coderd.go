@@ -1494,6 +1494,10 @@ func New(options *Options) *API {
 			r.Use(apiKeyMiddleware)
 			r.Get("/", api.tailnetRPCConn)
 		})
+		r.Route("/ai-tasks", func(r chi.Router) {
+			r.Use(apiKeyMiddleware)
+			r.Get("/name", api.TaskTitleAndWorkspaceName)
+		})
 	})
 
 	if options.SwaggerEndpoint {
