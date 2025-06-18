@@ -123,14 +123,3 @@ export const AlertTitle = forwardRef<
 ));
 AlertTitle.displayName = "AlertTitle";
 
-export const AlertDescription = forwardRef<
-	HTMLDivElement,
-	React.HTMLAttributes<HTMLDivElement>
->(({ className, ...props }, ref) => (
-	<div
-		ref={ref}
-		className={cn("text-sm [&_p]:leading-relaxed", className)}
-		{...props}
-	/>
-));
-AlertDescription.displayName = "AlertDescription";
