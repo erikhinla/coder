@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/stretchr/testify/assert"
@@ -958,6 +959,10 @@ func TestExpMcpReporter(t *testing.T) {
 			if test.event != nil {
 				err := sender(*test.event)
 				require.NoError(t, err)
+				// Give the event time to be processed through the queue
+				// before checking for updates. This prevents race conditions
+				// where we check for updates before the event has been handled.
+				time.Sleep(100 * time.Millisecond)
 			} else {
 				// Call the tool and ensure it works.
 				payload := fmt.Sprintf(`{"jsonrpc":"2.0","id":3,"method":"tools/call", "params": {"name": "coder_report_task", "arguments": {"state": %q, "summary": %q, "link": %q}}}`, test.state, test.summary, test.uri)
