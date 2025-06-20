@@ -7,6 +7,7 @@ import (
 	"tailscale.com/types/ptr"
 
 	"github.com/coder/coder/v2/coderd/util/slice"
+	previewtypes "github.com/coder/preview/types"
 	"github.com/coder/terraform-provider-coder/v2/provider"
 )
 
@@ -35,7 +36,7 @@ func ValidateWorkspaceBuildParameters(richParameters []TemplateVersionParameter,
 	return nil
 }
 
-func ValidateWorkspaceBuildParameter(richParameter TemplateVersionParameter, buildParameter *WorkspaceBuildParameter, lastBuildParameter *WorkspaceBuildParameter) error {
+func ValidateWorkspaceBuildParameter(richParameter previewtypes.Parameter, buildParameter *WorkspaceBuildParameter, lastBuildParameter *WorkspaceBuildParameter) error {
 	err := validateBuildParameter(richParameter, buildParameter, lastBuildParameter)
 	if err != nil {
 		name := richParameter.Name
@@ -47,7 +48,7 @@ func ValidateWorkspaceBuildParameter(richParameter TemplateVersionParameter, bui
 	return nil
 }
 
-func validateBuildParameter(richParameter TemplateVersionParameter, buildParameter *WorkspaceBuildParameter, lastBuildParameter *WorkspaceBuildParameter) error {
+func validateBuildParameter(richParameter previewtypes.Parameter, buildParameter *WorkspaceBuildParameter, lastBuildParameter *WorkspaceBuildParameter) error {
 	var (
 		current  string
 		previous *string
@@ -66,7 +67,7 @@ func validateBuildParameter(richParameter TemplateVersionParameter, buildParamet
 	}
 
 	if current == "" { // parameter is optional, so take the default value
-		current = richParameter.DefaultValue
+		current = richParameter.DefaultValue.AsString()
 	}
 
 	if len(richParameter.Options) > 0 && !inOptionSet(richParameter, current) {
@@ -98,15 +99,15 @@ func validateBuildParameter(richParameter TemplateVersionParameter, buildParamet
 }
 
 // inOptionSet returns if the value given is in the set of options for a parameter.
-func inOptionSet(richParameter TemplateVersionParameter, value string) bool {
+func inOptionSet(richParameter previewtypes.Parameter, value string) bool {
 	optionValues := make([]string, 0, len(richParameter.Options))
 	for _, option := range richParameter.Options {
-		optionValues = append(optionValues, option.Value)
+		optionValues = append(optionValues, option.Value.AsString())
 	}
 
 	// If the type is `list(string)` and the form_type is `multi-select`, then we check each individual
 	// value in the list against the option set.
-	isMultiSelect := richParameter.Type == provider.OptionTypeListString && richParameter.FormType == string(provider.ParameterFormTypeMultiSelect)
+	isMultiSelect := provider.OptionType(richParameter.Type) == provider.OptionTypeListString && provider.ParameterFormType(richParameter.FormType) == provider.ParameterFormTypeMultiSelect
 
 	if !isMultiSelect {
 		// This is the simple case. Just checking if the value is in the option set.
@@ -168,7 +169,7 @@ type ParameterResolver struct {
 
 // ValidateResolve checks the provided value, v, against the parameter, p, and the previous build.  If v is nil, it also
 // resolves the correct value.  It returns the value of the parameter, if valid, and an error if invalid.
-func (r *ParameterResolver) ValidateResolve(p TemplateVersionParameter, v *WorkspaceBuildParameter) (value string, err error) {
+func (r *ParameterResolver) ValidateResolve(p previewtypes.Parameter, v *WorkspaceBuildParameter) (value string, err error) {
 	prevV := r.findLastValue(p)
 	if !p.Mutable && v != nil && prevV != nil && v.Value != prevV.Value {
 		return "", xerrors.Errorf("Parameter %q is not mutable, so it can't be updated after creating a workspace.", p.Name)
@@ -186,7 +187,7 @@ func (r *ParameterResolver) ValidateResolve(p TemplateVersionParameter, v *Works
 	if resolvedValue == nil {
 		resolvedValue = &WorkspaceBuildParameter{
 			Name:  p.Name,
-			Value: p.DefaultValue,
+			Value: p.DefaultValue.AsString(),
 		}
 	}
 	err = ValidateWorkspaceBuildParameter(p, resolvedValue, prevV)
@@ -198,7 +199,7 @@ func (r *ParameterResolver) ValidateResolve(p TemplateVersionParameter, v *Works
 
 // Resolve returns the value of the parameter. It does not do any validation,
 // and is meant for use with the new dynamic parameters code path.
-func (r *ParameterResolver) Resolve(p TemplateVersionParameter, v *WorkspaceBuildParameter) string {
+func (r *ParameterResolver) Resolve(p previewtypes.Parameter, v *WorkspaceBuildParameter) string {
 	prevV := r.findLastValue(p)
 	// First, the provided value
 	resolvedValue := v
@@ -210,7 +211,7 @@ func (r *ParameterResolver) Resolve(p TemplateVersionParameter, v *WorkspaceBuil
 	if resolvedValue == nil {
 		resolvedValue = &WorkspaceBuildParameter{
 			Name:  p.Name,
-			Value: p.DefaultValue,
+			Value: p.DefaultValue.AsString(),
 		}
 	}
 	return resolvedValue.Value
@@ -218,7 +219,7 @@ func (r *ParameterResolver) Resolve(p TemplateVersionParameter, v *WorkspaceBuil
 
 // findLastValue finds the value from the previous build and returns it, or nil if the parameter had no value in the
 // last build.
-func (r *ParameterResolver) findLastValue(p TemplateVersionParameter) *WorkspaceBuildParameter {
+func (r *ParameterResolver) findLastValue(p previewtypes.Parameter) *WorkspaceBuildParameter {
 	for _, rp := range r.Rich {
 		if rp.Name == p.Name {
 			return &rp

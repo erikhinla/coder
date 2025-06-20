@@ -48,7 +48,7 @@ type loader struct {
 // Prepare is the entrypoint for this package. It loads the necessary objects &
 // files from the database and returns a Renderer that can be used to render the
 // template version's parameters.
-func Prepare(ctx context.Context, db database.Store, cache *files.Cache, versionID uuid.UUID, options ...func(r *loader)) (Renderer, error) {
+func Prepare(ctx context.Context, db database.Store, cache files.FileAcquirer, versionID uuid.UUID, options ...func(r *loader)) (Renderer, error) {
 	l := &loader{
 		templateVersionID: versionID,
 	}
@@ -121,7 +121,7 @@ func (r *loader) loadData(ctx context.Context, db database.Store) error {
 // Static parameter rendering is required to support older template versions that
 // do not have the database state to support dynamic parameters. A constant
 // warning will be displayed for these template versions.
-func (r *loader) Renderer(ctx context.Context, db database.Store, cache *files.Cache) (Renderer, error) {
+func (r *loader) Renderer(ctx context.Context, db database.Store, cache files.FileAcquirer) (Renderer, error) {
 	err := r.loadData(ctx, db)
 	if err != nil {
 		return nil, xerrors.Errorf("load data: %w", err)
@@ -131,46 +131,48 @@ func (r *loader) Renderer(ctx context.Context, db database.Store, cache *files.C
 		return r.staticRender(ctx, db)
 	}
 
-	return r.dynamicRenderer(ctx, db, cache)
+	return r.dynamicRenderer(ctx, db, files.NewCacheCloser(cache))
 }
 
 // Renderer caches all the necessary files when rendering a template version's
 // parameters. It must be closed after use to release the cached files.
-func (r *loader) dynamicRenderer(ctx context.Context, db database.Store, cache *files.Cache) (*dynamicRenderer, error) {
+func (r *loader) dynamicRenderer(ctx context.Context, db database.Store, cache *files.CacheCloser) (*dynamicRenderer, error) {
+	closeFiles := true
+	defer func() {
+		// If we have an error, we need to close the cache to release any
+		// acquired files.
+		if closeFiles {
+			cache.Close()
+		}
+	}()
+
 	// If they can read the template version, then they can read the file for
 	// parameter loading purposes.
 	//nolint:gocritic
 	fileCtx := dbauthz.AsFileReader(ctx)
-	templateFS, err := cache.Acquire(fileCtx, r.job.FileID)
+
+	var terraformFS fs.FS
+	var err error
+	terraformFS, err = cache.Acquire(fileCtx, r.job.FileID)
 	if err != nil {
 		return nil, xerrors.Errorf("acquire template file: %w", err)
 	}
 
-	var terraformFS fs.FS = templateFS
-	var moduleFilesFS *files.CloseFS
 	if r.terraformValues.CachedModuleFiles.Valid {
-		moduleFilesFS, err = cache.Acquire(fileCtx, r.terraformValues.CachedModuleFiles.UUID)
+		moduleFilesFS, err := cache.Acquire(fileCtx, r.terraformValues.CachedModuleFiles.UUID)
 		if err != nil {
-			templateFS.Close()
 			return nil, xerrors.Errorf("acquire module files: %w", err)
 		}
-		terraformFS = files.NewOverlayFS(templateFS, []files.Overlay{{Path: ".terraform/modules", FS: moduleFilesFS}})
+		terraformFS = files.NewOverlayFS(terraformFS, []files.Overlay{{Path: ".terraform/modules", FS: moduleFilesFS}})
 	}
 
+	closeFiles = false
 	return &dynamicRenderer{
 		data:        r,
 		templateFS:  terraformFS,
 		db:          db,
 		ownerErrors: make(map[uuid.UUID]error),
-		close: func() {
-			// Up to 2 files are cached, and must be released when rendering is complete.
-			// TODO: Might be smart to always call release when the context is
-			//  canceled.
-			templateFS.Close()
-			if moduleFilesFS != nil {
-				moduleFilesFS.Close()
-			}
-		},
+		close:       cache.Close,
 	}, nil
 }
 
@@ -220,6 +222,8 @@ func (r *dynamicRenderer) Render(ctx context.Context, ownerID uuid.UUID, values 
 	return preview.Preview(ctx, input, r.templateFS)
 }
 
+// TODO: Reduce the number of queries required here.
+// TODO: Allow option to used cached owner data, if available.
 func (r *dynamicRenderer) getWorkspaceOwnerData(ctx context.Context, ownerID uuid.UUID) error {
 	if r.currentOwner != nil && r.currentOwner.ID == ownerID.String() {
 		return nil // already fetched

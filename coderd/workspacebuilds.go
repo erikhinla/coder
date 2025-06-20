@@ -391,6 +391,7 @@ func (api *API) postWorkspaceBuilds(rw http.ResponseWriter, r *http.Request) {
 		workspaceBuild, provisionerJob, provisionerDaemons, err = builder.Build(
 			ctx,
 			tx,
+			api.FileCache,
 			func(action policy.Action, object rbac.Objecter) bool {
 				return api.Authorize(r, action, object)
 			},

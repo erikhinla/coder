@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
@@ -14,11 +15,14 @@ import (
 	"github.com/hashicorp/hcl/v2/hclsyntax"
 
 	"github.com/coder/coder/v2/apiversion"
+	"github.com/coder/coder/v2/coderd/dynamicparameters"
+	"github.com/coder/coder/v2/coderd/files"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/provisioner/terraform/tfparse"
 	"github.com/coder/coder/v2/provisionersdk"
 	sdkproto "github.com/coder/coder/v2/provisionersdk/proto"
+	previewtypes "github.com/coder/preview/types"
 
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
@@ -63,15 +67,16 @@ type Builder struct {
 	templateVersionPresetID  uuid.UUID
 
 	// used during build, makes function arguments less verbose
-	ctx   context.Context
-	store database.Store
+	ctx       context.Context
+	store     database.Store
+	fileCache *files.CacheCloser
 
 	// cache of objects, so we only fetch once
 	template                             *database.Template
 	templateVersion                      *database.TemplateVersion
 	templateVersionJob                   *database.ProvisionerJob
 	terraformValues                      *database.TemplateVersionTerraformValue
-	templateVersionParameters            *[]database.TemplateVersionParameter
+	templateVersionParameters            *[]previewtypes.Parameter
 	templateVersionVariables             *[]database.TemplateVersionVariable
 	templateVersionWorkspaceTags         *[]database.TemplateVersionWorkspaceTag
 	lastBuild                            *database.WorkspaceBuild
@@ -81,6 +86,7 @@ type Builder struct {
 	parameterNames                       *[]string
 	parameterValues                      *[]string
 	templateVersionPresetParameterValues []database.TemplateVersionPresetParameter
+	parameterRender                      dynamicparameters.Renderer
 
 	prebuiltWorkspaceBuildStage  sdkproto.PrebuiltWorkspaceBuildStage
 	verifyNoLegacyParametersOnce bool
@@ -256,11 +262,16 @@ func (e BuildError) Unwrap() error {
 func (b *Builder) Build(
 	ctx context.Context,
 	store database.Store,
+	fileCache *files.Cache,
 	authFunc func(action policy.Action, object rbac.Objecter) bool,
 	auditBaggage audit.WorkspaceBuildBaggage,
 ) (
 	*database.WorkspaceBuild, *database.ProvisionerJob, []database.GetEligibleProvisionerDaemonsByProvisionerJobIDsRow, error,
 ) {
+	b.fileCache = files.NewCacheCloser(fileCache)
+	// Always close opened files during the build
+	defer b.fileCache.Close()
+
 	var err error
 	b.ctx, err = audit.BaggageToContext(ctx, auditBaggage)
 	if err != nil {
@@ -552,6 +563,39 @@ func (b *Builder) getTemplateTerraformValues() (*database.TemplateVersionTerrafo
 	return b.terraformValues, err
 }
 
+func (b *Builder) getDynamicParameterRenderer() (dynamicparameters.Renderer, error) {
+	if b.parameterRender != nil {
+		return b.parameterRender, nil
+	}
+
+	tv, err := b.getTemplateVersion()
+	if err != nil {
+		return nil, xerrors.Errorf("get template version to get parameters: %w", err)
+	}
+
+	job, err := b.getTemplateVersionJob()
+	if err != nil {
+		return nil, xerrors.Errorf("get template version job to get parameters: %w", err)
+	}
+
+	tfVals, err := b.getTemplateTerraformValues()
+	if err != nil {
+		return nil, xerrors.Errorf("get template version terraform values: %w", err)
+	}
+
+	renderer, err := dynamicparameters.Prepare(b.ctx, b.store, b.fileCache, tv.ID,
+		dynamicparameters.WithTemplateVersion(*tv),
+		dynamicparameters.WithProvisionerJob(*job),
+		dynamicparameters.WithTerraformValues(*tfVals),
+	)
+	if err != nil {
+		return nil, xerrors.Errorf("get template version renderer: %w", err)
+	}
+
+	b.parameterRender = renderer
+	return renderer, nil
+}
+
 func (b *Builder) getLastBuild() (*database.WorkspaceBuild, error) {
 	if b.lastBuild != nil {
 		return b.lastBuild, nil
@@ -634,61 +678,19 @@ func (b *Builder) getParameters() (names, values []string, err error) {
 		Rich: lastBuildParameterValues,
 	}
 
-	// Dynamic parameters skip all parameter validation.
-	// Deleting a workspace also should skip parameter validation.
-	// Pass the user's input as is.
-	if b.usingDynamicParameters() {
-		// TODO: The previous behavior was only to pass param values
-		//  for parameters that exist. Since dynamic params can have
-		//  conditional parameter existence, the static frame of reference
-		//  is not sufficient. So assume the user is correct, or pull in the
-		//  dynamic param code to find the actual parameters.
-		latestValues := make(map[string]string, len(b.richParameterValues))
-		for _, latest := range b.richParameterValues {
-			latestValues[latest.Name] = latest.Value
-		}
-
-		// Merge the inputs with values from the previous build.
-		for _, last := range lastBuildParameterValues {
-			// TODO: Ideally we use the resolver here and look at parameter
-			//   fields such as 'ephemeral'. This requires loading the terraform
-			//   files. For now, just send the previous inputs as is.
-			if _, exists := latestValues[last.Name]; exists {
-				// latestValues take priority, so skip this previous value.
-				continue
-			}
-			names = append(names, last.Name)
-			values = append(values, last.Value)
-		}
-
-		for _, value := range b.richParameterValues {
-			names = append(names, value.Name)
-			values = append(values, value.Value)
-		}
-
-		b.parameterNames = &names
-		b.parameterValues = &values
-		return names, values, nil
-	}
-
-	for _, templateVersionParameter := range templateVersionParameters {
-		tvp, err := db2sdk.TemplateVersionParameter(templateVersionParameter)
-		if err != nil {
-			return nil, nil, BuildError{http.StatusInternalServerError, "failed to convert template version parameter", err}
-		}
-
+	for _, tvp := range templateVersionParameters {
 		value, err := resolver.ValidateResolve(
 			tvp,
-			b.findNewBuildParameterValue(templateVersionParameter.Name),
+			b.findNewBuildParameterValue(tvp.Name),
 		)
 		if err != nil {
 			// At this point, we've queried all the data we need from the database,
 			// so the only errors are problems with the request (missing data, failed
 			// validation, immutable parameters, etc.)
-			return nil, nil, BuildError{http.StatusBadRequest, fmt.Sprintf("Unable to validate parameter %q", templateVersionParameter.Name), err}
+			return nil, nil, BuildError{http.StatusBadRequest, fmt.Sprintf("Unable to validate parameter %q", tvp.Name), err}
 		}
 
-		names = append(names, templateVersionParameter.Name)
+		names = append(names, tvp.Name)
 		values = append(values, value)
 	}
 
@@ -736,20 +738,56 @@ func (b *Builder) getLastBuildParameters() ([]database.WorkspaceBuildParameter, 
 	return values, nil
 }
 
-func (b *Builder) getTemplateVersionParameters() ([]database.TemplateVersionParameter, error) {
+func (b *Builder) getTemplateVersionParameters() ([]previewtypes.Parameter, error) {
 	if b.templateVersionParameters != nil {
 		return *b.templateVersionParameters, nil
 	}
+
 	tvID, err := b.getTemplateVersionID()
 	if err != nil {
 		return nil, xerrors.Errorf("get template version ID to get parameters: %w", err)
 	}
+
+	if b.usingDynamicParameters() {
+		render, err := b.getDynamicParameterRenderer()
+		if err != nil {
+			return nil, xerrors.Errorf("get dynamic parameter renderer: %w", err)
+		}
+
+		previousValues, err := b.getLastBuildParameters()
+		if err != nil {
+			return nil, xerrors.Errorf("get last build parameters: %w", err)
+		}
+
+		paramValues := make(map[string]string, len(previousValues))
+		for _, p := range previousValues {
+			// TODO: Mark them as ephemeral here so we can omit them
+			//  at this step. At the moment, ephemeral parameters are
+			//  included in here.
+			paramValues[p.Name] = p.Value
+		}
+
+		// Any additional rich parameters provided by the caller
+		for _, p := range b.richParameterValues {
+			paramValues[p.Name] = p.Value
+		}
+
+		output, diags := render.Render(b.ctx, b.workspace.OwnerID, paramValues)
+		if diags.HasErrors() {
+			return nil, xerrors.Errorf("render: %w", errors.Join(diags.Errs()...))
+		}
+
+		b.templateVersionParameters = ptr.Ref(output.Parameters)
+		return *b.templateVersionParameters, nil
+	}
+
 	tvp, err := b.store.GetTemplateVersionParameters(b.ctx, tvID)
 	if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
 		return nil, xerrors.Errorf("get template version %s parameters: %w", tvID, err)
 	}
-	b.templateVersionParameters = &tvp
-	return tvp, nil
+
+	b.templateVersionParameters = ptr.Ref(db2sdk.List(tvp, dynamicparameters.TemplateVersionParameter))
+	return *b.templateVersionParameters, nil
 }
 
 func (b *Builder) getTemplateVersionVariables() ([]database.TemplateVersionVariable, error) {
