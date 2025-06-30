@@ -22,7 +22,7 @@ import { WorkspacesPageView } from "./WorkspacesPageView";
 import { useBatchActions } from "./batchActions";
 import { useStatusFilterMenu, useTemplateFilterMenu } from "./filter/menus";
 
-function useSafeSearchParams() {
+function useSafeSearchParams(): ReturnType<typeof useSearchParams> {
 	// Have to wrap setSearchParams because React Router doesn't make sure that
 	// the function's memory reference stays stable on each render, even though
 	// its logic never changes, and even though it has function update support
@@ -41,8 +41,11 @@ const WorkspacesPage: FC = () => {
 	// If we use a useSearchParams for each hook, the values will not be in sync.
 	// So we have to use a single one, centralizing the values, and pass it to
 	// each hook.
-	const searchParamsResult = useSafeSearchParams();
-	const pagination = usePagination({ searchParamsResult });
+	const [searchParams, setSearchParams] = useSafeSearchParams();
+	const pagination = usePagination({
+		searchParams,
+		onSearchParamsChange: setSearchParams,
+	});
 	const { permissions, user: me } = useAuthenticated();
 	const { entitlements } = useDashboard();
 	const templatesQuery = useQuery(templates());
@@ -67,7 +70,8 @@ const WorkspacesPage: FC = () => {
 	}, [templatesQuery.data, workspacePermissionsQuery.data]);
 
 	const filterProps = useWorkspacesFilter({
-		searchParamsResult,
+		searchParams,
+		onSearchParamsChange: setSearchParams,
 		onFilterChange: () => pagination.goToPage(1),
 	});
 
@@ -88,7 +92,6 @@ const WorkspacesPage: FC = () => {
 	const [confirmingBatchAction, setConfirmingBatchAction] = useState<
 		"delete" | "update" | null
 	>(null);
-	const [urlSearchParams] = searchParamsResult;
 	const canCheckWorkspaces =
 		entitlements.features.workspace_batch_actions.enabled;
 	const batchActions = useBatchActions({
@@ -103,7 +106,7 @@ const WorkspacesPage: FC = () => {
 	// biome-ignore lint/correctness/useExhaustiveDependencies: consider refactoring
 	useEffect(() => {
 		setCheckedWorkspaces([]);
-	}, [urlSearchParams]);
+	}, [searchParams]);
 
 	return (
 		<>
@@ -179,17 +182,20 @@ const WorkspacesPage: FC = () => {
 export default WorkspacesPage;
 
 type UseWorkspacesFilterOptions = {
-	searchParamsResult: ReturnType<typeof useSearchParams>;
+	searchParams: URLSearchParams;
+	onSearchParamsChange: (newParams: URLSearchParams) => void;
 	onFilterChange: () => void;
 };
 
 const useWorkspacesFilter = ({
-	searchParamsResult,
+	searchParams,
+	onSearchParamsChange,
 	onFilterChange,
 }: UseWorkspacesFilterOptions) => {
 	const filter = useFilter({
 		fallbackFilter: "owner:me",
-		searchParamsResult,
+		searchParams,
+		onSearchParamsChange,
 		onUpdate: onFilterChange,
 	});
 
