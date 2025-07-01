@@ -1,6 +1,6 @@
 import type { Workspace } from "api/typesGenerated";
-import { type FC, ReactElement, ReactNode, useState } from "react";
-import { Dialog, DialogContent } from "components/Dialog/Dialog";
+import { type FC, type ReactNode, useEffect, useState } from "react";
+import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
 import { Button } from "components/Button/Button";
 import { useQueries } from "react-query";
 import { templateVersion } from "api/queries/templates";
@@ -24,7 +24,7 @@ function groupWorkspacesByTemplateVersionId(
 	const grouped = new Map<string, TemplateVersionGroup>();
 
 	for (const ws of workspaces) {
-		const templateVersionId = ws.latest_build.template_version_id;
+		const templateVersionId = ws.template_active_version_id;
 		const value = grouped.get(templateVersionId);
 		if (value !== undefined) {
 			// Need to do type assertion to make value mutable as an
@@ -83,12 +83,33 @@ const ReviewPanel: FC<WorkspacePanelProps> = ({
 	workspaceIconUrl,
 }) => {
 	return (
-		<div className="rounded-md px-4 py-2 border border-solid border-content-secondary/50 text-sm">
-			<div className="flex flex-row flex-wrap grow items-center gap-2">
+		<div className="rounded-md px-4 py-3 border border-solid border-content-secondary/25 text-sm">
+			<div className="flex flex-row flex-wrap grow items-center gap-3">
 				<Avatar size="sm" variant="icon" src={workspaceIconUrl} />
-				{workspaceName}
+				<div className="flex flex-col gap-0.5">
+					<span className="leading-tight">{workspaceName}</span>
+					<span className="text-xs leading-tight text-content-secondary">
+						{label}
+					</span>
+				</div>
 			</div>
 		</div>
+	);
+};
+
+type TemplateNameChangeProps = Readonly<{
+	oldTemplateName: string;
+	newTemplateName: string;
+}>;
+
+const TemplateNameChange: FC<TemplateNameChangeProps> = ({
+	oldTemplateName,
+	newTemplateName,
+}) => {
+	return (
+		<span>
+			{oldTemplateName} <span>&rarr;</span> {newTemplateName}
+		</span>
 	);
 };
 
@@ -108,6 +129,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// they can be changed by another user + be subject to a query invalidation
 	// while the form is open
 	const [cachedWorkspaces, setCachedWorkspaces] = useState(workspacesToUpdate);
+
+	useEffect(() => {
+		console.log(cachedWorkspaces);
+	}, [cachedWorkspaces]);
+
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
 	// then skip over them for all other update logic
@@ -120,10 +146,12 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const templateVersionQueries = useQueries({
 		queries: groups.map((g) => templateVersion(g.templateVersionId)),
 	});
+
 	// React Query persists previous errors even if a query is no longer in the
 	// error state, so we need to explicitly check the isError property to see
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
+
 	const merged = templateVersionQueries.every((q) => q.isSuccess)
 		? templateVersionQueries.map((q) => q.data)
 		: undefined;
@@ -135,86 +163,133 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	);
 
 	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
-	const updateIsReady = error !== undefined && readyToUpdate.length > 0;
+	const updateIsReady = error === undefined && readyToUpdate.length > 0;
 
 	return (
 		<form
-			className="overflow-y-auto max-h-[90vh]"
+			className="max-h-[90vh]"
 			onSubmit={(e) => {
 				e.preventDefault();
 				onSubmit();
 			}}
 		>
-			<div className="flex flex-row justify-between items-center pb-6">
-				<h3 className="text-2xl font-semibold m-0 leading-tight">
-					Review update
-				</h3>
+			{error !== undefined ? (
+				<ErrorAlert error={error} />
+			) : (
+				<>
+					<div className="overflow-y-auto flex flex-col gap-2">
+						<div className="flex flex-row justify-between items-center pb-6">
+							<DialogTitle asChild>
+								<h3 className="text-3xl font-semibold m-0 leading-tight">
+									Review update
+								</h3>
+							</DialogTitle>
 
-				<Button
-					variant="outline"
-					disabled={!workspacesChangedWhileOpen}
-					onClick={() => setCachedWorkspaces(workspacesToUpdate)}
-				>
-					Refresh list
-				</Button>
-			</div>
+							<Button
+								variant="outline"
+								disabled={!workspacesChangedWhileOpen}
+								onClick={() => setCachedWorkspaces(workspacesToUpdate)}
+							>
+								Refresh list
+							</Button>
+						</div>
 
-			{error !== undefined && <ErrorAlert error={error} />}
+						{readyToUpdate.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Ready to update</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										These workspaces have available updates.
+									</p>
+								</div>
 
-			{noUpdateNeeded.length > 0 && (
-				<section className="border-0 border-t border-solid border-t-content-secondary/25 py-4">
-					<div className="max-w-prose">
-						<h4 className="m-0">Updated workspaces</h4>
-						<p className="m-0 text-sm leading-snug text-content-secondary">
-							These workspaces are fully up to date and will be skipped during
-							the update.
-						</p>
+								<ul className="list-none p-0 flex flex-col gap-3">
+									{readyToUpdate.map((ws) => {
+										const matchedQuery = templateVersionQueries.find(
+											(q) => q.data?.id === ws.template_active_version_id,
+										);
+										const newTemplateName = matchedQuery?.data?.name;
+
+										return (
+											<li key={ws.id}>
+												<ReviewPanel
+													workspaceName={ws.name}
+													workspaceIconUrl={ws.template_icon}
+													label={
+														newTemplateName !== undefined && (
+															<TemplateNameChange
+																newTemplateName={newTemplateName}
+																oldTemplateName={
+																	ws.latest_build.template_version_name
+																}
+															/>
+														)
+													}
+												/>
+											</li>
+										);
+									})}
+								</ul>
+							</section>
+						)}
+
+						{noUpdateNeeded.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Updated workspaces</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										These workspaces are fully updated and will be skipped.
+									</p>
+								</div>
+
+								<ul className="list-none p-0 flex flex-col gap-3">
+									{noUpdateNeeded.map((ws) => (
+										<li key={ws.id}>
+											<ReviewPanel
+												workspaceName={ws.name}
+												workspaceIconUrl={ws.template_icon}
+											/>
+										</li>
+									))}
+								</ul>
+							</section>
+						)}
+
+						{dormant.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Dormant workspaces</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										Dormant workspaces cannot be updated without first
+										activating the workspace. They will be skipped during the
+										batch update.
+									</p>
+								</div>
+
+								<ul className="list-none p-0 flex flex-col gap-3">
+									{dormant.map((ws) => (
+										<li key={ws.id}>
+											<ReviewPanel
+												workspaceName={ws.name}
+												workspaceIconUrl={ws.template_icon}
+											/>
+										</li>
+									))}
+								</ul>
+							</section>
+						)}
 					</div>
 
-					<ul className="list-none p-0">
-						{noUpdateNeeded.map((ws) => (
-							<li key={ws.id}>
-								<ReviewPanel
-									workspaceName={ws.name}
-									workspaceIconUrl={ws.template_icon}
-								/>
-							</li>
-						))}
-					</ul>
-				</section>
-			)}
-
-			{dormant.length > 0 && (
-				<section className="border-0 border-t border-solid border-t-content-secondary/25 py-4">
-					<div className="max-w-prose">
-						<h4 className="m-0">Dormant workspaces</h4>
-						<p className="m-0 text-sm leading-snug text-content-secondary">
-							Dormant workspaces cannot be updated without first activating the
-							workspace. They will be skipped during the batch update.
-						</p>
+					<div className="flex flex-row flex-wrap justify-end gap-4 border-0 border-t border-solid border-t-border pt-4">
+						<Button variant="outline" onClick={onCancel}>
+							Cancel
+						</Button>
+						<Button variant="default" type="submit" disabled={!updateIsReady}>
+							Update
+						</Button>
 					</div>
-
-					<ul className="list-none p-0">
-						{dormant.map((ws) => (
-							<li key={ws.id}>
-								<ReviewPanel
-									workspaceName={ws.name}
-									workspaceIconUrl={ws.template_icon}
-								/>
-							</li>
-						))}
-					</ul>
-				</section>
+				</>
 			)}
-
-			<div className="flex flex-row flex-wrap justify-end gap-4">
-				<Button variant="outline" onClick={onCancel}>
-					Cancel
-				</Button>
-				<Button variant="default" type="submit" disabled={!updateIsReady}>
-					Update
-				</Button>
-			</div>
 		</form>
 	);
 };
@@ -245,7 +320,10 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 		>
 			<DialogContent className="max-w-screen-md">
 				{loading ? (
-					<Loader />
+					<>
+						<DialogTitle>Loading&hellip;</DialogTitle>
+						<Loader />
+					</>
 				) : (
 					<ReviewForm
 						workspacesToUpdate={workspacesToUpdate}
