@@ -8,6 +8,7 @@ import { Loader } from "components/Loader/Loader";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { Avatar } from "components/Avatar/Avatar";
 import { cn } from "utils/cn";
+import _ from "lodash";
 
 /**
  * @todo Need to decide if we should include the template display name here, or
@@ -45,13 +46,15 @@ function groupWorkspacesByTemplateVersionId(
 	return [...grouped.values()];
 }
 
-type Separation = Readonly<{
+type UpdateTypePartition = Readonly<{
 	dormant: readonly Workspace[];
 	noUpdateNeeded: readonly Workspace[];
 	readyToUpdate: readonly Workspace[];
 }>;
 
-function separateWorkspaces(workspaces: readonly Workspace[]): Separation {
+function separateWorkspacesByUpdateType(
+	workspaces: readonly Workspace[],
+): UpdateTypePartition {
 	const noUpdateNeeded: Workspace[] = [];
 	const dormant: Workspace[] = [];
 	const readyToUpdate: Workspace[] = [];
@@ -74,6 +77,7 @@ function separateWorkspaces(workspaces: readonly Workspace[]): Separation {
 type WorkspacePanelProps = Readonly<{
 	workspaceName: string;
 	workspaceIconUrl: string;
+	running?: boolean;
 	label?: ReactNode;
 	adornment?: ReactNode;
 	className?: string;
@@ -144,12 +148,17 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// they can be changed by another user + be subject to a query invalidation
 	// while the form is open
 	const [cachedWorkspaces, setCachedWorkspaces] = useState(workspacesToUpdate);
+	// Used to force the user to acknowledge that batch updating has risks in
+	// certain situations and could destroy their data. Initial value
+	// deliberately *not* based on any derived values to avoid state sync issues
+	// as cachedWorkspaces gets refreshed
+	const [acceptedConsequences, setAcceptedConsequences] = useState(false);
 
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
 	// then skip over them for all other update logic
 	const { dormant, noUpdateNeeded, readyToUpdate } =
-		separateWorkspaces(cachedWorkspaces);
+		separateWorkspacesByUpdateType(cachedWorkspaces);
 
 	// The workspaces don't have all necessary data by themselves, so we need to
 	// fetch the unique template versions, and massage the results
@@ -167,18 +176,21 @@ const ReviewForm: FC<ReviewFormProps> = ({
 		? templateVersionQueries.map((q) => q.data)
 		: undefined;
 
-	// Also need to tease apart workspaces that are actively running, because
-	// there's a whole set of warnings we need to issue about them
-	const running = readyToUpdate.filter(
+	const [running, notRunning] = _.partition(
+		readyToUpdate,
 		(ws) => ws.latest_build.status === "running",
 	);
 
 	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
-	const updateIsReady = error === undefined && readyToUpdate.length > 0;
+	const consequencesResolved = running.length === 0 || acceptedConsequences;
+	const canSubmit =
+		consequencesResolved &&
+		error === undefined &&
+		(running.length > 0 || notRunning.length > 0);
 
 	return (
 		<form
-			className="max-h-[90vh]"
+			className="max-h-[80vh]"
 			onSubmit={(e) => {
 				e.preventDefault();
 				onSubmit();
@@ -200,7 +212,10 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								variant="outline"
 								size="sm"
 								disabled={!workspacesChangedWhileOpen}
-								onClick={() => setCachedWorkspaces(workspacesToUpdate)}
+								onClick={() => {
+									setCachedWorkspaces(workspacesToUpdate);
+									setAcceptedConsequences(false);
+								}}
 							>
 								Refresh list
 							</Button>
@@ -211,13 +226,43 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								<div className="max-w-prose">
 									<h4 className="m-0">Ready to update</h4>
 									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces have available updates and require no
-										additional action before updating.
+										These workspaces require no additional action before
+										updating.
 									</p>
 								</div>
 
 								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{readyToUpdate.map((ws) => {
+									{running.map((ws) => {
+										const matchedQuery = templateVersionQueries.find(
+											(q) => q.data?.id === ws.template_active_version_id,
+										);
+										const newTemplateName = matchedQuery?.data?.name;
+
+										return (
+											<li
+												key={ws.id}
+												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+											>
+												<ReviewPanel
+													running
+													className="border-none"
+													workspaceName={ws.name}
+													workspaceIconUrl={ws.template_icon}
+													label={
+														newTemplateName !== undefined && (
+															<TemplateNameChange
+																newTemplateName={newTemplateName}
+																oldTemplateName={
+																	ws.latest_build.template_version_name
+																}
+															/>
+														)
+													}
+												/>
+											</li>
+										);
+									})}
+									{notRunning.map((ws) => {
 										const matchedQuery = templateVersionQueries.find(
 											(q) => q.data?.id === ws.template_active_version_id,
 										);
@@ -305,11 +350,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						)}
 					</div>
 
-					<div className="flex flex-row flex-wrap justify-end gap-4 border-0 border-t border-solid border-t-border pt-4">
+					<div className="flex flex-row flex-wrap justify-end gap-4 border-0 border-t border-solid border-t-border pt-8">
 						<Button variant="outline" onClick={onCancel}>
 							Cancel
 						</Button>
-						<Button variant="default" type="submit" disabled={!updateIsReady}>
+						<Button variant="default" type="submit" disabled={!canSubmit}>
 							Update
 						</Button>
 					</div>
