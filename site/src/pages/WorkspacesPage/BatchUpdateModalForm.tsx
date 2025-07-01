@@ -1,5 +1,5 @@
 import type { Workspace } from "api/typesGenerated";
-import { type FC, type ReactNode, useEffect, useState } from "react";
+import { type FC, type ReactNode, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
 import { Button } from "components/Button/Button";
 import { useQueries } from "react-query";
@@ -7,6 +7,7 @@ import { templateVersion } from "api/queries/templates";
 import { Loader } from "components/Loader/Loader";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { Avatar } from "components/Avatar/Avatar";
+import { cn } from "utils/cn";
 
 /**
  * @todo Need to decide if we should include the template display name here, or
@@ -75,15 +76,24 @@ type WorkspacePanelProps = Readonly<{
 	workspaceIconUrl: string;
 	label?: ReactNode;
 	adornment?: ReactNode;
+	className?: string;
 }>;
 
 const ReviewPanel: FC<WorkspacePanelProps> = ({
 	workspaceName,
 	label,
 	workspaceIconUrl,
+	className,
 }) => {
+	// Preemptively adding border to this component so that it still looks
+	// decent when used outside of a list
 	return (
-		<div className="rounded-md px-4 py-3 border border-solid border-content-secondary/25 text-sm">
+		<div
+			className={cn(
+				"rounded-md px-4 py-3 border border-solid border-border text-sm",
+				className,
+			)}
+		>
 			<div className="flex flex-row flex-wrap grow items-center gap-3">
 				<Avatar size="sm" variant="icon" src={workspaceIconUrl} />
 				<div className="flex flex-col gap-0.5">
@@ -107,9 +117,14 @@ const TemplateNameChange: FC<TemplateNameChangeProps> = ({
 	newTemplateName,
 }) => {
 	return (
-		<span>
-			{oldTemplateName} <span>&rarr;</span> {newTemplateName}
-		</span>
+		<>
+			<span aria-hidden>
+				{oldTemplateName} &rarr; {newTemplateName}
+			</span>
+			<span className="sr-only">
+				{oldTemplateName} will be updated to {newTemplateName}
+			</span>
+		</>
 	);
 };
 
@@ -129,10 +144,6 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// they can be changed by another user + be subject to a query invalidation
 	// while the form is open
 	const [cachedWorkspaces, setCachedWorkspaces] = useState(workspacesToUpdate);
-
-	useEffect(() => {
-		console.log(cachedWorkspaces);
-	}, [cachedWorkspaces]);
 
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
@@ -177,16 +188,17 @@ const ReviewForm: FC<ReviewFormProps> = ({
 				<ErrorAlert error={error} />
 			) : (
 				<>
-					<div className="overflow-y-auto flex flex-col gap-2">
-						<div className="flex flex-row justify-between items-center pb-6">
+					<div className="overflow-y-auto flex flex-col gap-2 pb-3">
+						<div className="flex flex-row justify-between items-center pb-4">
 							<DialogTitle asChild>
 								<h3 className="text-3xl font-semibold m-0 leading-tight">
-									Review update
+									Review updates
 								</h3>
 							</DialogTitle>
 
 							<Button
 								variant="outline"
+								size="sm"
 								disabled={!workspacesChangedWhileOpen}
 								onClick={() => setCachedWorkspaces(workspacesToUpdate)}
 							>
@@ -199,11 +211,12 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								<div className="max-w-prose">
 									<h4 className="m-0">Ready to update</h4>
 									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces have available updates.
+										These workspaces have available updates and require no
+										additional action before updating.
 									</p>
 								</div>
 
-								<ul className="list-none p-0 flex flex-col gap-3">
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
 									{readyToUpdate.map((ws) => {
 										const matchedQuery = templateVersionQueries.find(
 											(q) => q.data?.id === ws.template_active_version_id,
@@ -211,8 +224,12 @@ const ReviewForm: FC<ReviewFormProps> = ({
 										const newTemplateName = matchedQuery?.data?.name;
 
 										return (
-											<li key={ws.id}>
+											<li
+												key={ws.id}
+												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+											>
 												<ReviewPanel
+													className="border-none"
 													workspaceName={ws.name}
 													workspaceIconUrl={ws.template_icon}
 													label={
@@ -236,16 +253,20 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						{noUpdateNeeded.length > 0 && (
 							<section>
 								<div className="max-w-prose">
-									<h4 className="m-0">Updated workspaces</h4>
+									<h4 className="m-0">Already updated</h4>
 									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces are fully updated and will be skipped.
+										These workspaces are already updated and will be skipped.
 									</p>
 								</div>
 
-								<ul className="list-none p-0 flex flex-col gap-3">
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
 									{noUpdateNeeded.map((ws) => (
-										<li key={ws.id}>
+										<li
+											key={ws.id}
+											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+										>
 											<ReviewPanel
+												className="border-none"
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
 											/>
@@ -266,10 +287,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 									</p>
 								</div>
 
-								<ul className="list-none p-0 flex flex-col gap-3">
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
 									{dormant.map((ws) => (
-										<li key={ws.id}>
+										<li
+											key={ws.id}
+											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+										>
 											<ReviewPanel
+												className="border-none"
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
 											/>
