@@ -1,9 +1,12 @@
-import { TemplateVersion, type Workspace } from "api/typesGenerated";
-import { type FC, useMemo, useState } from "react";
+import type { Workspace } from "api/typesGenerated";
+import { type FC, ReactElement, ReactNode, useState } from "react";
 import { Dialog, DialogContent } from "components/Dialog/Dialog";
 import { Button } from "components/Button/Button";
 import { useQueries } from "react-query";
 import { templateVersion } from "api/queries/templates";
+import { Loader } from "components/Loader/Loader";
+import { ErrorAlert } from "components/Alert/ErrorAlert";
+import { Avatar } from "components/Avatar/Avatar";
 
 /**
  * @todo Need to decide if we should include the template display name here, or
@@ -41,61 +44,85 @@ function groupWorkspacesByTemplateVersionId(
 	return [...grouped.values()];
 }
 
-type WorkspaceDeltaEntry = Readonly<{}>;
-type WorkspaceDeltas = Map<string, WorkspaceDeltaEntry | null>;
+type Separation = Readonly<{
+	dormant: readonly Workspace[];
+	noUpdateNeeded: readonly Workspace[];
+	readyToUpdate: readonly Workspace[];
+}>;
 
-function separateWorkspacesByDormancy(
-	workspaces: readonly Workspace[],
-): readonly [dormant: readonly Workspace[], active: readonly Workspace[]] {
+function separateWorkspaces(workspaces: readonly Workspace[]): Separation {
+	const noUpdateNeeded: Workspace[] = [];
 	const dormant: Workspace[] = [];
-	const active: Workspace[] = [];
+	const readyToUpdate: Workspace[] = [];
 
 	for (const ws of workspaces) {
-		// If a workspace doesn't have any pending updates whatsoever, we can
-		// safely skip processing it
 		if (!ws.outdated) {
+			noUpdateNeeded.push(ws);
 			continue;
 		}
-		if (ws.dormant_at) {
+		if (ws.dormant_at !== null) {
 			dormant.push(ws);
-		} else {
-			active.push(ws);
+			continue;
 		}
+		readyToUpdate.push(ws);
 	}
 
-	return [dormant, active];
+	return { dormant, noUpdateNeeded, readyToUpdate };
 }
 
-type BatchUpdateModalFormProps = Readonly<{
+type WorkspacePanelProps = Readonly<{
+	workspaceName: string;
+	workspaceIconUrl: string;
+	label?: ReactNode;
+	adornment?: ReactNode;
+}>;
+
+const ReviewPanel: FC<WorkspacePanelProps> = ({
+	workspaceName,
+	label,
+	workspaceIconUrl,
+}) => {
+	return (
+		<div className="rounded-md px-4 py-2 border border-solid border-content-secondary/50 text-sm">
+			<div className="flex flex-row flex-wrap grow items-center gap-2">
+				<Avatar size="sm" variant="icon" src={workspaceIconUrl} />
+				{workspaceName}
+			</div>
+		</div>
+	);
+};
+
+type ReviewFormProps = Readonly<{
 	workspacesToUpdate: readonly Workspace[];
-	onClose: () => void;
+	onCancel: () => void;
 	onSubmit: () => void;
 }>;
 
-export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
+const ReviewForm: FC<ReviewFormProps> = ({
 	workspacesToUpdate,
-	onClose,
+	onCancel,
 	onSubmit,
 }) => {
 	// We need to take a local snapshot of the workspaces that existed on mount
 	// because workspaces are such a mutable resource, and there's a chance that
 	// they can be changed by another user + be subject to a query invalidation
-	// while the form is open. We need to cross-reference these with the latest
-	// workspaces from props so that we can display any changes in the UI
+	// while the form is open
 	const [cachedWorkspaces, setCachedWorkspaces] = useState(workspacesToUpdate);
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
 	// then skip over them for all other update logic
-	const [dormant, active] = separateWorkspacesByDormancy(cachedWorkspaces);
+	const { dormant, noUpdateNeeded, readyToUpdate } =
+		separateWorkspaces(cachedWorkspaces);
 
 	// The workspaces don't have all necessary data by themselves, so we need to
 	// fetch the unique template versions, and massage the results
-	const groups = groupWorkspacesByTemplateVersionId(active);
+	const groups = groupWorkspacesByTemplateVersionId(readyToUpdate);
 	const templateVersionQueries = useQueries({
 		queries: groups.map((g) => templateVersion(g.templateVersionId)),
 	});
 	// React Query persists previous errors even if a query is no longer in the
-	// error state, so we need to explicitly check the isError property
+	// error state, so we need to explicitly check the isError property to see
+	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 	const merged = templateVersionQueries.every((q) => q.isSuccess)
 		? templateVersionQueries.map((q) => q.data)
@@ -103,34 +130,132 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 
 	// Also need to tease apart workspaces that are actively running, because
 	// there's a whole set of warnings we need to issue about them
-	const running = active.filter((a) => a.latest_build.status === "running");
-	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
+	const running = readyToUpdate.filter(
+		(ws) => ws.latest_build.status === "running",
+	);
 
-	const deltas = useMemo<WorkspaceDeltas>(() => new Map(), []);
+	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
+	const updateIsReady = error !== undefined && readyToUpdate.length > 0;
 
 	return (
-		<Dialog>
-			<DialogContent>
-				<form
-					className="max-w-lg px-4"
-					onSubmit={(e) => {
-						e.preventDefault();
-						console.log("Blah");
-						onSubmit();
-					}}
+		<form
+			className="overflow-y-auto max-h-[90vh]"
+			onSubmit={(e) => {
+				e.preventDefault();
+				onSubmit();
+			}}
+		>
+			<div className="flex flex-row justify-between items-center pb-6">
+				<h3 className="text-2xl font-semibold m-0 leading-tight">
+					Review update
+				</h3>
+
+				<Button
+					variant="outline"
+					disabled={!workspacesChangedWhileOpen}
+					onClick={() => setCachedWorkspaces(workspacesToUpdate)}
 				>
-					<div className="flex flex-row justify-between">
-						<h2 className="text-xl font-semibold m-0 leading-tight">
-							Review updates
-						</h2>
-						<Button
-							disabled={workspacesChangedWhileOpen}
-							onClick={() => setCachedWorkspaces(workspacesToUpdate)}
-						>
-							Refresh
-						</Button>
+					Refresh list
+				</Button>
+			</div>
+
+			{error !== undefined && <ErrorAlert error={error} />}
+
+			{noUpdateNeeded.length > 0 && (
+				<section className="border-0 border-t border-solid border-t-content-secondary/25 py-4">
+					<div className="max-w-prose">
+						<h4 className="m-0">Updated workspaces</h4>
+						<p className="m-0 text-sm leading-snug text-content-secondary">
+							These workspaces are fully up to date and will be skipped during
+							the update.
+						</p>
 					</div>
-				</form>
+
+					<ul className="list-none p-0">
+						{noUpdateNeeded.map((ws) => (
+							<li key={ws.id}>
+								<ReviewPanel
+									workspaceName={ws.name}
+									workspaceIconUrl={ws.template_icon}
+								/>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+
+			{dormant.length > 0 && (
+				<section className="border-0 border-t border-solid border-t-content-secondary/25 py-4">
+					<div className="max-w-prose">
+						<h4 className="m-0">Dormant workspaces</h4>
+						<p className="m-0 text-sm leading-snug text-content-secondary">
+							Dormant workspaces cannot be updated without first activating the
+							workspace. They will be skipped during the batch update.
+						</p>
+					</div>
+
+					<ul className="list-none p-0">
+						{dormant.map((ws) => (
+							<li key={ws.id}>
+								<ReviewPanel
+									workspaceName={ws.name}
+									workspaceIconUrl={ws.template_icon}
+								/>
+							</li>
+						))}
+					</ul>
+				</section>
+			)}
+
+			<div className="flex flex-row flex-wrap justify-end gap-4">
+				<Button variant="outline" onClick={onCancel}>
+					Cancel
+				</Button>
+				<Button variant="default" type="submit" disabled={!updateIsReady}>
+					Update
+				</Button>
+			</div>
+		</form>
+	);
+};
+
+type BatchUpdateModalFormProps = Readonly<{
+	workspacesToUpdate: readonly Workspace[];
+	open: boolean;
+	loading: boolean;
+	onClose: () => void;
+	onSubmit: () => void;
+}>;
+
+export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
+	open,
+	loading,
+	workspacesToUpdate,
+	onClose,
+	onSubmit,
+}) => {
+	return (
+		<Dialog
+			open={open}
+			onOpenChange={() => {
+				if (open) {
+					onClose();
+				}
+			}}
+		>
+			<DialogContent className="max-w-screen-md">
+				{loading ? (
+					<Loader />
+				) : (
+					<ReviewForm
+						workspacesToUpdate={workspacesToUpdate}
+						onCancel={onClose}
+						onSubmit={() => {
+							onSubmit();
+							onClose();
+						}}
+					/>
+				)}
 			</DialogContent>
 		</Dialog>
 	);

@@ -17,10 +17,10 @@ import { useQuery, useQueryClient } from "react-query";
 import { useSearchParams } from "react-router-dom";
 import { pageTitle } from "utils/page";
 import { BatchDeleteConfirmation } from "./BatchDeleteConfirmation";
-import { BatchUpdateConfirmation } from "./BatchUpdateConfirmation";
 import { WorkspacesPageView } from "./WorkspacesPageView";
 import { useBatchActions } from "./batchActions";
 import { useStatusFilterMenu, useTemplateFilterMenu } from "./filter/menus";
+import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 
 function useSafeSearchParams(): ReturnType<typeof useSearchParams> {
 	// Have to wrap setSearchParams because React Router doesn't make sure that
@@ -35,6 +35,8 @@ function useSafeSearchParams(): ReturnType<typeof useSearchParams> {
 		typeof useSearchParams
 	>;
 }
+
+type BatchAction = "delete" | "update";
 
 const WorkspacesPage: FC = () => {
 	const queryClient = useQueryClient();
@@ -89,9 +91,7 @@ const WorkspacesPage: FC = () => {
 	const [checkedWorkspaces, setCheckedWorkspaces] = useState<
 		readonly Workspace[]
 	>([]);
-	const [confirmingBatchAction, setConfirmingBatchAction] = useState<
-		"delete" | "update" | null
-	>(null);
+	const [activeBatchAction, setActiveBatchAction] = useState<BatchAction>();
 	const canCheckWorkspaces =
 		entitlements.features.workspace_batch_actions.enabled;
 	const batchActions = useBatchActions({
@@ -130,8 +130,8 @@ const WorkspacesPage: FC = () => {
 				onPageChange={pagination.goToPage}
 				filterProps={filterProps}
 				isRunningBatchAction={batchActions.isLoading}
-				onDeleteAll={() => setConfirmingBatchAction("delete")}
-				onUpdateAll={() => setConfirmingBatchAction("update")}
+				onDeleteAll={() => setActiveBatchAction("delete")}
+				onUpdateAll={() => setActiveBatchAction("update")}
 				onStartAll={() => batchActions.startAll(checkedWorkspaces)}
 				onStopAll={() => batchActions.stopAll(checkedWorkspaces)}
 				onActionSuccess={async () => {
@@ -150,29 +150,34 @@ const WorkspacesPage: FC = () => {
 			<BatchDeleteConfirmation
 				isLoading={batchActions.isLoading}
 				checkedWorkspaces={checkedWorkspaces}
-				open={confirmingBatchAction === "delete"}
+				open={activeBatchAction === "delete"}
 				onConfirm={async () => {
 					await batchActions.deleteAll(checkedWorkspaces);
-					setConfirmingBatchAction(null);
+					setActiveBatchAction(undefined);
 				}}
 				onClose={() => {
-					setConfirmingBatchAction(null);
+					setActiveBatchAction(undefined);
 				}}
 			/>
 
-			<BatchUpdateConfirmation
-				isLoading={batchActions.isLoading}
-				checkedWorkspaces={checkedWorkspaces}
-				open={confirmingBatchAction === "update"}
-				onConfirm={async () => {
-					await batchActions.updateAll({
-						workspaces: checkedWorkspaces,
-						isDynamicParametersEnabled: false,
-					});
-					setConfirmingBatchAction(null);
-				}}
-				onClose={() => {
-					setConfirmingBatchAction(null);
+			<BatchUpdateModalForm
+				open={activeBatchAction === "update"}
+				loading={batchActions.isLoading}
+				workspacesToUpdate={checkedWorkspaces}
+				onClose={() => setActiveBatchAction(undefined)}
+				onSubmit={async () => {
+					console.log("Hooray!");
+					/**
+					 * @todo Make sure this gets added back in once more of the
+					 * component has been fleshed out
+					 */
+					if (false) {
+						await batchActions.updateAll({
+							workspaces: checkedWorkspaces,
+							isDynamicParametersEnabled: false,
+						});
+					}
+					setActiveBatchAction(undefined);
 				}}
 			/>
 		</>
