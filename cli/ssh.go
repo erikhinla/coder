@@ -557,7 +557,28 @@ func (r *RootCmd) ssh() *serpent.Command {
 				}
 			}
 
-			err = sshSession.RequestPty("xterm-256color", 128, 128, gossh.TerminalModes{})
+			// Configure terminal modes for better compatibility with SSH clients like MobaXTerm.
+			// This ensures that control sequences like Ctrl+R (reverse search) work properly.
+			terminalModes := gossh.TerminalModes{
+				gossh.ECHO:          1,     // Enable echo
+				gossh.TTY_OP_ISPEED: 14400, // Input speed = 14.4kbaud
+				gossh.TTY_OP_OSPEED: 14400, // Output speed = 14.4kbaud
+				gossh.VINTR:         3,     // Ctrl+C (interrupt)
+				gossh.VQUIT:         28,    // Ctrl+\ (quit)
+				gossh.VERASE:        127,   // Backspace
+				gossh.VKILL:         21,    // Ctrl+U (kill line)
+				gossh.VEOF:          4,     // Ctrl+D (end of file)
+				gossh.VEOL:          0,     // End of line
+				gossh.VEOL2:         0,     // End of line 2
+				gossh.VSTART:        17,    // Ctrl+Q (start)
+				gossh.VSTOP:         19,    // Ctrl+S (stop)
+				gossh.VSUSP:         26,    // Ctrl+Z (suspend)
+				gossh.VREPRINT:      18,    // Ctrl+R (reprint line)
+				gossh.VWERASE:       23,    // Ctrl+W (word erase)
+				gossh.VLNEXT:        22,    // Ctrl+V (literal next)
+				gossh.VDISCARD:      15,    // Ctrl+O (discard output)
+			}
+			err = sshSession.RequestPty("xterm-256color", 128, 128, terminalModes)
 			if err != nil {
 				return xerrors.Errorf("request pty: %w", err)
 			}
