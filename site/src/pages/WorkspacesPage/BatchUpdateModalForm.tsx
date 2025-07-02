@@ -1,14 +1,16 @@
 import type { Workspace } from "api/typesGenerated";
-import { type FC, type ReactNode, useState } from "react";
+import { type FC, type ReactNode, Suspense, useState } from "react";
 import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
 import { Button } from "components/Button/Button";
-import { useQueries } from "react-query";
+import { useSuspenseQueries } from "react-query";
 import { templateVersion } from "api/queries/templates";
 import { Loader } from "components/Loader/Loader";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { Avatar } from "components/Avatar/Avatar";
 import { cn } from "utils/cn";
-import _ from "lodash";
+import { Checkbox } from "components/Checkbox/Checkbox";
+import { Badge } from "components/Badge/Badge";
+import { Label } from "@radix-ui/react-label";
 
 /**
  * @todo Need to decide if we should include the template display name here, or
@@ -86,6 +88,7 @@ type WorkspacePanelProps = Readonly<{
 const ReviewPanel: FC<WorkspacePanelProps> = ({
 	workspaceName,
 	label,
+	running,
 	workspaceIconUrl,
 	className,
 }) => {
@@ -101,7 +104,14 @@ const ReviewPanel: FC<WorkspacePanelProps> = ({
 			<div className="flex flex-row flex-wrap grow items-center gap-3">
 				<Avatar size="sm" variant="icon" src={workspaceIconUrl} />
 				<div className="flex flex-col gap-0.5">
-					<span className="leading-tight">{workspaceName}</span>
+					<span className="flex flex-row items-center gap-2">
+						<span className="leading-tight">{workspaceName}</span>
+						{running && (
+							<Badge size="xs" variant="warning" border="none">
+								Running
+							</Badge>
+						)}
+					</span>
 					<span className="text-xs leading-tight text-content-secondary">
 						{label}
 					</span>
@@ -123,23 +133,60 @@ const TemplateNameChange: FC<TemplateNameChangeProps> = ({
 	return (
 		<>
 			<span aria-hidden>
-				{oldTemplateName} &rarr; {newTemplateName}
+				Template: {oldTemplateName} &rarr; {newTemplateName}
 			</span>
 			<span className="sr-only">
-				{oldTemplateName} will be updated to {newTemplateName}
+				Template {oldTemplateName} will be updated to template {newTemplateName}
 			</span>
 		</>
 	);
 };
 
+type RunningWorkspacesWarningProps = Readonly<{
+	acceptedConsequences: boolean;
+	onAcceptedConsequencesChange: (newValue: boolean) => void;
+}>;
+
+const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
+	acceptedConsequences,
+	onAcceptedConsequencesChange,
+}) => {
+	return (
+		<div className="rounded-md border-border-warning border border-solid p-4">
+			<h4 className="m-0 font-semibold">Running workspaces detected</h4>
+			<ul className="flex flex-col gap-1 m-0 [&>li]:leading-snug text-content-secondary pt-1">
+				<li>
+					Updating a workspace will start it on its latest template version.
+					This can delete non-persistent data.
+				</li>
+				<li>
+					Anyone connected to a running workspace will be disconnected until the
+					update is complete.
+				</li>
+				<li>Any unsaved data will be lost.</li>
+			</ul>
+			<Label className="flex flex-row gap-2 items-center pt-4">
+				<Checkbox
+					className="border-border-warning bg-surface-orange"
+					checked={acceptedConsequences}
+					onCheckedChange={onAcceptedConsequencesChange}
+				/>
+				I acknowledge these consequences.
+			</Label>
+		</div>
+	);
+};
+
 type ReviewFormProps = Readonly<{
 	workspacesToUpdate: readonly Workspace[];
+	isProcessing: boolean;
 	onCancel: () => void;
 	onSubmit: () => void;
 }>;
 
 const ReviewForm: FC<ReviewFormProps> = ({
 	workspacesToUpdate,
+	isProcessing,
 	onCancel,
 	onSubmit,
 }) => {
@@ -163,7 +210,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// The workspaces don't have all necessary data by themselves, so we need to
 	// fetch the unique template versions, and massage the results
 	const groups = groupWorkspacesByTemplateVersionId(readyToUpdate);
-	const templateVersionQueries = useQueries({
+	const templateVersionQueries = useSuspenseQueries({
 		queries: groups.map((g) => templateVersion(g.templateVersionId)),
 	});
 
@@ -182,8 +229,9 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			.map((ws) => ws.id),
 	);
 
+	const hasRunningWorkspaces = runningIds.size > 0;
+	const consequencesResolved = !hasRunningWorkspaces || acceptedConsequences;
 	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
-	const consequencesResolved = runningIds.size === 0 || acceptedConsequences;
 	const canSubmit =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
@@ -220,13 +268,24 @@ const ReviewForm: FC<ReviewFormProps> = ({
 							</Button>
 						</div>
 
+						{hasRunningWorkspaces && (
+							<div className="pb-2">
+								<RunningWorkspacesWarning
+									acceptedConsequences={acceptedConsequences}
+									onAcceptedConsequencesChange={(newValue) => {
+										setAcceptedConsequences(newValue);
+									}}
+								/>
+							</div>
+						)}
+
 						{readyToUpdate.length > 0 && (
 							<section>
 								<div className="max-w-prose">
 									<h4 className="m-0">Ready to update</h4>
 									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces require no additional action before
-										updating.
+										These workspaces require no additional build parameters to
+										update.
 									</p>
 								</div>
 
@@ -349,6 +408,9 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 	onClose,
 	onSubmit,
 }) => {
+	// Splitting up the component so that we (1) we only mount the state when
+	// we know a user actually opened the dialog content, and (2) so it's easy
+	// to add a Suspense boundary for the data fetching
 	return (
 		<Dialog
 			open={open}
@@ -359,21 +421,24 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 			}}
 		>
 			<DialogContent className="max-w-screen-md">
-				{isProcessing ? (
-					<>
-						<DialogTitle>Loading&hellip;</DialogTitle>
-						<Loader />
-					</>
-				) : (
+				<Suspense
+					fallback={
+						<>
+							<DialogTitle>Loading&hellip;</DialogTitle>
+							<Loader />
+						</>
+					}
+				>
 					<ReviewForm
 						workspacesToUpdate={workspacesToUpdate}
+						isProcessing={isProcessing}
 						onCancel={onClose}
 						onSubmit={() => {
 							onSubmit();
 							onClose();
 						}}
 					/>
-				)}
+				</Suspense>
 			</DialogContent>
 		</Dialog>
 	);
