@@ -176,17 +176,16 @@ const ReviewForm: FC<ReviewFormProps> = ({
 		? templateVersionQueries.map((q) => q.data)
 		: undefined;
 
-	const [running, notRunning] = _.partition(
-		readyToUpdate,
-		(ws) => ws.latest_build.status === "running",
+	const runningIds = new Set<string>(
+		readyToUpdate
+			.filter((ws) => ws.latest_build.status === "running")
+			.map((ws) => ws.id),
 	);
 
 	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
-	const consequencesResolved = running.length === 0 || acceptedConsequences;
+	const consequencesResolved = runningIds.size === 0 || acceptedConsequences;
 	const canSubmit =
-		consequencesResolved &&
-		error === undefined &&
-		(running.length > 0 || notRunning.length > 0);
+		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
 	return (
 		<form
@@ -232,37 +231,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								</div>
 
 								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{running.map((ws) => {
-										const matchedQuery = templateVersionQueries.find(
-											(q) => q.data?.id === ws.template_active_version_id,
-										);
-										const newTemplateName = matchedQuery?.data?.name;
-
-										return (
-											<li
-												key={ws.id}
-												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-											>
-												<ReviewPanel
-													running
-													className="border-none"
-													workspaceName={ws.name}
-													workspaceIconUrl={ws.template_icon}
-													label={
-														newTemplateName !== undefined && (
-															<TemplateNameChange
-																newTemplateName={newTemplateName}
-																oldTemplateName={
-																	ws.latest_build.template_version_name
-																}
-															/>
-														)
-													}
-												/>
-											</li>
-										);
-									})}
-									{notRunning.map((ws) => {
+									{readyToUpdate.map((ws) => {
 										const matchedQuery = templateVersionQueries.find(
 											(q) => q.data?.id === ws.template_active_version_id,
 										);
@@ -275,6 +244,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 											>
 												<ReviewPanel
 													className="border-none"
+													running={runningIds.has(ws.id)}
 													workspaceName={ws.name}
 													workspaceIconUrl={ws.template_icon}
 													label={
@@ -367,14 +337,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 type BatchUpdateModalFormProps = Readonly<{
 	workspacesToUpdate: readonly Workspace[];
 	open: boolean;
-	loading: boolean;
+	isProcessing: boolean;
 	onClose: () => void;
 	onSubmit: () => void;
 }>;
 
 export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 	open,
-	loading,
+	isProcessing,
 	workspacesToUpdate,
 	onClose,
 	onSubmit,
@@ -389,7 +359,7 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 			}}
 		>
 			<DialogContent className="max-w-screen-md">
-				{loading ? (
+				{isProcessing ? (
 					<>
 						<DialogTitle>Loading&hellip;</DialogTitle>
 						<Loader />

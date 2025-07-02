@@ -162,11 +162,11 @@ const WorkspacesPage: FC = () => {
 
 			<BatchUpdateModalForm
 				open={activeBatchAction === "update"}
-				loading={batchActions.isProcessing}
+				isProcessing={batchActions.isProcessing}
 				workspacesToUpdate={checkedWorkspaces}
 				onClose={() => setActiveBatchAction(undefined)}
 				onSubmit={async () => {
-					console.log("Hooray!");
+					window.alert("Hooray!");
 					/**
 					 * @todo Make sure this gets added back in once more of the
 					 * component has been fleshed out
