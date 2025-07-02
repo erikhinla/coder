@@ -2,7 +2,6 @@ import { getErrorDetail, getErrorMessage } from "api/errors";
 import { workspacePermissionsByOrganization } from "api/queries/organizations";
 import { templates } from "api/queries/templates";
 import { workspaces } from "api/queries/workspaces";
-import type { Workspace } from "api/typesGenerated";
 import { useFilter } from "components/Filter/Filter";
 import { useUserFilterMenu } from "components/Filter/UserFilter";
 import { displayError } from "components/GlobalSnackbar/utils";
@@ -11,7 +10,7 @@ import { useEffectEvent } from "hooks/hookPolyfills";
 import { usePagination } from "hooks/usePagination";
 import { useDashboard } from "modules/dashboard/useDashboard";
 import { useOrganizationsFilterMenu } from "modules/tableFiltering/options";
-import { type FC, useEffect, useMemo, useState } from "react";
+import { type FC, useMemo, useState } from "react";
 import { Helmet } from "react-helmet-async";
 import { useQuery, useQueryClient } from "react-query";
 import { useSearchParams } from "react-router-dom";
@@ -88,25 +87,32 @@ const WorkspacesPage: FC = () => {
 		},
 	});
 
-	const [checkedWorkspaces, setCheckedWorkspaces] = useState<
-		readonly Workspace[]
-	>([]);
+	const [checkedWorkspaceIds, setCheckedWorkspaceIds] = useState(
+		new Set<string>(),
+	);
+	const checkedWorkspaces =
+		data?.workspaces.filter((w) => checkedWorkspaceIds.has(w.id)) ?? [];
 	const [activeBatchAction, setActiveBatchAction] = useState<BatchAction>();
 	const canCheckWorkspaces =
 		entitlements.features.workspace_batch_actions.enabled;
 	const batchActions = useBatchActions({
 		onSuccess: async () => {
 			await refetch();
-			setCheckedWorkspaces([]);
+			setCheckedWorkspaceIds(new Set());
 		},
 	});
 
-	// We want to uncheck the selected workspaces always when the url changes
-	// because of filtering or pagination
-	// biome-ignore lint/correctness/useExhaustiveDependencies: consider refactoring
-	useEffect(() => {
-		setCheckedWorkspaces([]);
-	}, [searchParams]);
+	// We always want to uncheck the selected workspaces when the url changes,
+	// because it has filtering and pagination that can change which workspaces
+	// the user can interact with. Can probably make this logic more fine-
+	// grained, but we don't want to swap this to a useEffect, because that
+	// will introduce extra page-wide renders in one of the heaviest pages in
+	// the entire site
+	const [cachedParams, setCachedParams] = useState(searchParams);
+	if (cachedParams !== searchParams && checkedWorkspaceIds.size > 0) {
+		setCachedParams(searchParams);
+		setCheckedWorkspaceIds(new Set());
+	}
 
 	return (
 		<>
@@ -118,7 +124,18 @@ const WorkspacesPage: FC = () => {
 				canCreateTemplate={permissions.createTemplates}
 				canChangeVersions={permissions.updateTemplates}
 				checkedWorkspaces={checkedWorkspaces}
-				onCheckChange={setCheckedWorkspaces}
+				onCheckChange={(newWorkspaces) => {
+					setCheckedWorkspaceIds((current) => {
+						const newIds = newWorkspaces.map((ws) => ws.id);
+						const sameContent =
+							current.size === newIds.length &&
+							newIds.every((id) => current.has(id));
+						if (sameContent) {
+							return current;
+						}
+						return new Set(newIds);
+					});
+				}}
 				canCheckWorkspaces={canCheckWorkspaces}
 				templates={filteredTemplates}
 				templatesFetchStatus={templatesQuery.status}
@@ -164,7 +181,7 @@ const WorkspacesPage: FC = () => {
 				open={activeBatchAction === "update"}
 				isProcessing={batchActions.isProcessing}
 				workspacesToUpdate={checkedWorkspaces}
-				onClose={() => setActiveBatchAction(undefined)}
+				onCancel={() => setActiveBatchAction(undefined)}
 				onSubmit={async () => {
 					window.alert("Hooray!");
 					/**
