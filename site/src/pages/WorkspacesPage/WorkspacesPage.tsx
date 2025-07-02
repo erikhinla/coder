@@ -39,13 +39,29 @@ type BatchAction = "delete" | "update";
 
 const WorkspacesPage: FC = () => {
 	const queryClient = useQueryClient();
-	// If we use a useSearchParams for each hook, the values will not be in sync.
-	// So we have to use a single one, centralizing the values, and pass it to
-	// each hook.
+	// We have to be careful with how we use useSearchParams or any other
+	// derived hooks. The URL is global state, but useSearchParams gives back a
+	// different state value based on where the hook was mounted. If we call the
+	// hook in the other hooks, we'll have multiple conflicting sources of truth
 	const [searchParams, setSearchParams] = useSafeSearchParams();
+	// Always need to make sure that we reset the checked workspaces each time
+	// the filtering or pagination changes, as that will almost always change
+	// which workspaces are shown on screen and which can be interacted with
+	const [checkedWorkspaceIds, setCheckedWorkspaceIds] = useState(
+		new Set<string>(),
+	);
+	const resetChecked = () => {
+		setCheckedWorkspaceIds((current) => {
+			return current.size === 0 ? current : new Set();
+		});
+	};
+
 	const pagination = usePagination({
 		searchParams,
-		onSearchParamsChange: setSearchParams,
+		onSearchParamsChange: (newParams) => {
+			setSearchParams(newParams);
+			resetChecked();
+		},
 	});
 	const { permissions, user: me } = useAuthenticated();
 	const { entitlements } = useDashboard();
@@ -73,7 +89,10 @@ const WorkspacesPage: FC = () => {
 	const filterProps = useWorkspacesFilter({
 		searchParams,
 		onSearchParamsChange: setSearchParams,
-		onFilterChange: () => pagination.goToPage(1),
+		onFilterChange: () => {
+			pagination.goToPage(1);
+			resetChecked();
+		},
 	});
 
 	const workspacesQueryOptions = workspaces({
@@ -87,32 +106,18 @@ const WorkspacesPage: FC = () => {
 		},
 	});
 
-	const [checkedWorkspaceIds, setCheckedWorkspaceIds] = useState(
-		new Set<string>(),
-	);
-	const checkedWorkspaces =
-		data?.workspaces.filter((w) => checkedWorkspaceIds.has(w.id)) ?? [];
 	const [activeBatchAction, setActiveBatchAction] = useState<BatchAction>();
 	const canCheckWorkspaces =
 		entitlements.features.workspace_batch_actions.enabled;
 	const batchActions = useBatchActions({
 		onSuccess: async () => {
 			await refetch();
-			setCheckedWorkspaceIds(new Set());
+			resetChecked();
 		},
 	});
 
-	// We always want to uncheck the selected workspaces when the url changes,
-	// because it has filtering and pagination that can change which workspaces
-	// the user can interact with. Can probably make this logic more fine-
-	// grained, but we don't want to swap this to a useEffect, because that
-	// will introduce extra page-wide renders in one of the heaviest pages in
-	// the entire site
-	const [cachedParams, setCachedParams] = useState(searchParams);
-	if (cachedParams !== searchParams && checkedWorkspaceIds.size > 0) {
-		setCachedParams(searchParams);
-		setCheckedWorkspaceIds(new Set());
-	}
+	const checkedWorkspaces =
+		data?.workspaces.filter((w) => checkedWorkspaceIds.has(w.id)) ?? [];
 
 	return (
 		<>
