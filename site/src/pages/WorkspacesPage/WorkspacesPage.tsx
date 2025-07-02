@@ -129,11 +129,11 @@ const WorkspacesPage: FC = () => {
 				limit={pagination.limit}
 				onPageChange={pagination.goToPage}
 				filterProps={filterProps}
-				isRunningBatchAction={batchActions.isLoading}
+				isRunningBatchAction={batchActions.isProcessing}
 				onDeleteAll={() => setActiveBatchAction("delete")}
 				onUpdateAll={() => setActiveBatchAction("update")}
-				onStartAll={() => batchActions.startAll(checkedWorkspaces)}
-				onStopAll={() => batchActions.stopAll(checkedWorkspaces)}
+				onStartAll={() => batchActions.start(checkedWorkspaces)}
+				onStopAll={() => batchActions.stop(checkedWorkspaces)}
 				onActionSuccess={async () => {
 					await queryClient.invalidateQueries({
 						queryKey: workspacesQueryOptions.queryKey,
@@ -148,11 +148,11 @@ const WorkspacesPage: FC = () => {
 			/>
 
 			<BatchDeleteConfirmation
-				isLoading={batchActions.isLoading}
+				isLoading={batchActions.isProcessing}
 				checkedWorkspaces={checkedWorkspaces}
 				open={activeBatchAction === "delete"}
 				onConfirm={async () => {
-					await batchActions.deleteAll(checkedWorkspaces);
+					await batchActions.delete(checkedWorkspaces);
 					setActiveBatchAction(undefined);
 				}}
 				onClose={() => {
@@ -162,7 +162,7 @@ const WorkspacesPage: FC = () => {
 
 			<BatchUpdateModalForm
 				open={activeBatchAction === "update"}
-				loading={batchActions.isLoading}
+				loading={batchActions.isProcessing}
 				workspacesToUpdate={checkedWorkspaces}
 				onClose={() => setActiveBatchAction(undefined)}
 				onSubmit={async () => {
@@ -172,7 +172,7 @@ const WorkspacesPage: FC = () => {
 					 * component has been fleshed out
 					 */
 					if (false) {
-						await batchActions.updateAll({
+						await batchActions.updateTemplateVersions({
 							workspaces: checkedWorkspaces,
 							isDynamicParametersEnabled: false,
 						});
