@@ -15,9 +15,8 @@ import {
 import { Spinner } from "components/Spinner/Spinner";
 import {
 	type FC,
-	ForwardedRef,
+	type ForwardedRef,
 	type ReactNode,
-	forwardRef,
 	useId,
 	useRef,
 	useState,
@@ -206,7 +205,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const hookId = useId();
 	const [stage, setStage] = useState<ConsequencesStage>("notAccepted");
 	const consequencesContainerRef = useRef<HTMLDivElement>(null);
-	const checkboxRef = useRef<HTMLButtonElement>(null);
+	const consequencesCheckboxRef = useRef<HTMLButtonElement>(null);
 
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
@@ -246,6 +245,12 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const failedValidationId = `${hookId}-failed-validation`;
 	const hasRunningWorkspaces = runningIds.size > 0;
 	const consequencesResolved = !hasRunningWorkspaces || stage === "accepted";
+
+	// For UX/accessibility reasons, we're splitting hairs between whether a
+	// form submission seems possible, versus whether clicking the button will
+	// give the user useful results/feedback. If we do a blanket disable for the
+	// button, there's many cases where there's no way to give them feedback
+	// on how to get themselves unstuck.
 	const submitButtonDisabled = isProcessing || transitioningIds.size > 0;
 	const submitIsPossible =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
@@ -264,13 +269,13 @@ const ReviewForm: FC<ReviewFormProps> = ({
 				}
 
 				setStage("failedValidation");
-				// Makes sure that if the modal is long enough to scroll
-				// that the checkbox isn't on screen anymore, it goes back
-				// to being on screen
+				// Makes sure that if the modal is long enough to scroll and if
+				// the warning section checkbox isn't on screen anymore, the
+				// warning section goes back to being on screen
 				consequencesContainerRef.current?.scrollIntoView({
 					behavior: "smooth",
 				});
-				checkboxRef.current?.focus();
+				consequencesCheckboxRef.current?.focus();
 			}}
 		>
 			{error !== undefined ? (
@@ -292,7 +297,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						{hasRunningWorkspaces && (
 							<div className="pb-2">
 								<RunningWorkspacesWarning
-									checkboxRef={checkboxRef}
+									checkboxRef={consequencesCheckboxRef}
 									containerRef={consequencesContainerRef}
 									acceptedConsequences={stage === "accepted"}
 									onAcceptedConsequencesChange={(newChecked) => {
@@ -483,7 +488,7 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 				 * state only mounts when the user actually opens up the batch
 				 * update form. That saves us from mounting a bunch of extra
 				 * state and firing extra queries, when realistically, the form
-				 * will stay closed 99% of the time the user is on the
+				 * will stay closed 99% of the time while the user is on the
 				 * workspaces page.
 				 */}
 				<ReviewForm
