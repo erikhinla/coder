@@ -1,6 +1,10 @@
 import { getErrorDetail, getErrorMessage } from "api/errors";
 import { workspacePermissionsByOrganization } from "api/queries/organizations";
-import { templates } from "api/queries/templates";
+import {
+	templates,
+	templateVersion,
+	templateVersionRoot,
+} from "api/queries/templates";
 import { workspaces } from "api/queries/workspaces";
 import { useFilter } from "components/Filter/Filter";
 import { useUserFilterMenu } from "components/Filter/UserFilter";
@@ -154,9 +158,29 @@ const WorkspacesPage: FC = () => {
 				filterProps={filterState}
 				isRunningBatchAction={batchActions.isProcessing}
 				onDeleteAll={() => setActiveBatchAction("delete")}
-				onUpdateAll={() => setActiveBatchAction("update")}
 				onStartAll={() => batchActions.start(checkedWorkspaces)}
 				onStopAll={() => batchActions.stop(checkedWorkspaces)}
+				onUpdateAll={() => {
+					// Just because batch-updating can be really dangerous
+					// action for running workspaces, we're going to invalidate
+					// all relevant queries as a prefetch strategy before the
+					// modal content is even allowed to mount.
+					for (const ws of checkedWorkspaces) {
+						// Our data layer is a little messy right now, so
+						// there's no great way to invalidate a bunch of
+						// template version queries with a single function call,
+						// while also avoiding all other tangentially connected
+						// resources that use the same key pattern. Have to be
+						// super granular and make one call per workspace.
+						queryClient.invalidateQueries({
+							queryKey: [templateVersionRoot, ws.template_active_version_id],
+							type: "all",
+							exact: true,
+							stale: true,
+						});
+					}
+					setActiveBatchAction("update");
+				}}
 				onActionSuccess={async () => {
 					await queryClient.invalidateQueries({
 						queryKey: workspacesQueryOptions.queryKey,
@@ -174,11 +198,9 @@ const WorkspacesPage: FC = () => {
 				isLoading={batchActions.isProcessing}
 				checkedWorkspaces={checkedWorkspaces}
 				open={activeBatchAction === "delete"}
+				onClose={() => setActiveBatchAction(undefined)}
 				onConfirm={async () => {
 					await batchActions.delete(checkedWorkspaces);
-					setActiveBatchAction(undefined);
-				}}
-				onClose={() => {
 					setActiveBatchAction(undefined);
 				}}
 			/>

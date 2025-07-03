@@ -106,9 +106,11 @@ export const templateExamples = () => {
 	};
 };
 
+export const templateVersionRoot: string = "templateVersion"
+
 export const templateVersion = (versionId: string) => {
 	return {
-		queryKey: ["templateVersion", versionId],
+		queryKey: [templateVersionRoot, versionId],
 		queryFn: () => API.getTemplateVersion(versionId),
 	};
 };
@@ -119,7 +121,7 @@ export const templateVersionByName = (
 	versionName: string,
 ) => {
 	return {
-		queryKey: ["templateVersion", organizationId, templateName, versionName],
+		queryKey: [templateVersionRoot, organizationId, templateName, versionName],
 		queryFn: () =>
 			API.getTemplateVersionByName(organizationId, templateName, versionName),
 	};
@@ -138,7 +140,7 @@ export const templateVersions = (templateId: string) => {
 };
 
 export const templateVersionVariablesKey = (versionId: string) => [
-	"templateVersion",
+templateVersionRoot,
 	versionId,
 	"variables",
 ];
@@ -201,7 +203,7 @@ export const templaceACLAvailable = (
 };
 
 const templateVersionExternalAuthKey = (versionId: string) => [
-	"templateVersion",
+templateVersionRoot,
 	versionId,
 	"externalAuth",
 ];
@@ -242,21 +244,21 @@ const createTemplateFn = async (options: CreateTemplateOptions) => {
 
 export const templateVersionLogs = (versionId: string) => {
 	return {
-		queryKey: ["templateVersion", versionId, "logs"],
+		queryKey: [templateVersionRoot, versionId, "logs"],
 		queryFn: () => API.getTemplateVersionLogs(versionId),
 	};
 };
 
 export const richParameters = (versionId: string) => {
 	return {
-		queryKey: ["templateVersion", versionId, "richParameters"],
+		queryKey: [templateVersionRoot, versionId, "richParameters"],
 		queryFn: () => API.getTemplateVersionRichParameters(versionId),
 	};
 };
 
 export const resources = (versionId: string) => {
 	return {
-		queryKey: ["templateVersion", versionId, "resources"],
+		queryKey: [templateVersionRoot, versionId, "resources"],
 		queryFn: () => API.getTemplateVersionResources(versionId),
 	};
 };
@@ -278,7 +280,7 @@ export const previousTemplateVersion = (
 ) => {
 	return {
 		queryKey: [
-			"templateVersion",
+templateVersionRoot,
 			organizationId,
 			templateName,
 			versionName,
@@ -298,7 +300,7 @@ export const previousTemplateVersion = (
 
 export const templateVersionPresets = (versionId: string) => {
 	return {
-		queryKey: ["templateVersion", versionId, "presets"],
+		queryKey: [templateVersionRoot, versionId, "presets"],
 		queryFn: () => API.getTemplateVersionPresets(versionId),
 	};
 };
