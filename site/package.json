@@ -190,7 +190,8 @@
 		"vite-plugin-checker": "0.9.3",
 		"vite-plugin-turbosnap": "1.0.3",
 		"@types/testing-library__react": "14.2.2",
-		"@types/testing-library__user-event": "14.2.1"
+		"@types/testing-library__user-event": "14.2.1",
+		"@jest/globals": "29.7.0"
 	},
 	"browserslist": ["chrome 110", "firefox 111", "safari 16.0"],
 	"resolutions": {
