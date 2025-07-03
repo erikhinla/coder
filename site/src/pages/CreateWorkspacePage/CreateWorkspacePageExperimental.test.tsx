@@ -737,48 +737,6 @@ describe("CreateWorkspacePageExperimental", () => {
 	});
 
 	describe("Auto-creation Mode", () => {
-		// it("auto create a workspace if uses mode=auto", async () => {
-		// 	const param = "first_parameter";
-		// 	const paramValue = "It works!";
-		// 	const createWorkspaceSpy = jest.spyOn(API, "createWorkspace");
-
-		// 	renderWithAuth(<CreateWorkspacePageExperimental />, {
-		// 		route: `/templates/default/${MockTemplate.name}/workspace?param.${param}=${paramValue}&mode=auto`,
-		// 		path: "/templates/:organization/:template/workspace",
-		// 	});
-
-		// 	await waitForLoaderToBeRemoved();
-
-		// 	// Wait for WebSocket parameters to load first
-		// 	await waitFor(() => {
-		// 		expect(screen.getByText("Instance Type")).toBeInTheDocument();
-		// 	});
-
-		// 	// Debug what's happening
-		// 	console.log("createWorkspace spy call count:", createWorkspaceSpy.mock.calls.length);
-		// 	console.log("createWorkspace spy calls:", createWorkspaceSpy.mock.calls);
-
-		// 	// Wait for auto-creation with extended timeout
-		// 	await waitFor(
-		// 		() => {
-		// 			expect(createWorkspaceSpy).toHaveBeenCalledWith(
-		// 				"me",
-		// 				expect.objectContaining({
-		// 					template_version_id: MockTemplate.active_version_id,
-		// 					rich_parameter_values: [
-		// 						expect.objectContaining({
-		// 							name: param,
-		// 							source: "url",
-		// 							value: paramValue,
-		// 						}),
-		// 					],
-		// 				}),
-		// 			);
-		// 		},
-		// 		{ timeout: 10000 }
-		// 	);
-		// });
-
 		it("falls back to form mode when auto-creation fails", async () => {
 			jest
 				.spyOn(API, "getTemplateVersionExternalAuth")
@@ -855,257 +813,107 @@ describe("CreateWorkspacePageExperimental", () => {
 				);
 			});
 		});
-
-		// 	it("displays creation progress", async () => {
-		// 		jest
-		// 			.spyOn(API, "createWorkspace")
-		// 			.mockImplementation(
-		// 				() =>
-		// 					new Promise((resolve) =>
-		// 						setTimeout(() => resolve(MockWorkspace), 1000),
-		// 					),
-		// 			);
-
-		// 		renderCreateWorkspacePageExperimental();
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		const nameInput = screen.getByRole("textbox", {
-		// 			name: /workspace name/i,
-		// 		});
-		// 		await userEvent.clear(nameInput);
-		// 		await userEvent.type(nameInput, "my-test-workspace");
-
-		// 		// Submit form
-		// 		const createButton = screen.getByRole("button", {
-		// 			name: /create workspace/i,
-		// 		});
-		// 		await userEvent.click(createButton);
-
-		// 		// Should show loading state
-		// 		expect(screen.getByText(/creating/i)).toBeInTheDocument();
-		// 		expect(createButton).toBeDisabled();
-		// 	});
-
-		// 	it("handles creation errors", async () => {
-		// 		const errorMessage = "Failed to create workspace";
-		// 		jest
-		// 			.spyOn(API, "createWorkspace")
-		// 			.mockRejectedValue(new Error(errorMessage));
-
-		// 		renderCreateWorkspacePageExperimental();
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		const nameInput = screen.getByRole("textbox", {
-		// 			name: /workspace name/i,
-		// 		});
-		// 		await userEvent.clear(nameInput);
-		// 		await userEvent.type(nameInput, "my-test-workspace");
-
-		// 		// Submit form
-		// 		const createButton = screen.getByRole("button", {
-		// 			name: /create workspace/i,
-		// 		});
-		// 		await userEvent.click(createButton);
-
-		// 		await waitFor(() => {
-		// 			expect(screen.getByText(errorMessage)).toBeInTheDocument();
-		// 		});
-		// 	});
-		// });
-
-		// describe("URL Parameters", () => {
-		// 	it("pre-fills parameters from URL", async () => {
-		// 		renderCreateWorkspacePageExperimental(
-		// 			`/templates/${MockTemplate.name}/workspace?param.instance_type=t3.large&param.cpu_count=4`,
-		// 		);
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		await waitFor(() => {
-		// 			// Verify parameters are pre-filled
-		// 			// This would require checking the actual form values
-		// 			expect(screen.getByText("Instance Type")).toBeInTheDocument();
-		// 			expect(screen.getByText("CPU Count")).toBeInTheDocument();
-		// 		});
-		// 	});
-
-		// 	it("uses custom template version when specified", async () => {
-		// 		const customVersionId = "custom-version-123";
-
-		// 		renderCreateWorkspacePageExperimental(
-		// 			`/templates/${MockTemplate.name}/workspace?version=${customVersionId}`,
-		// 		);
-
-		// 		await waitFor(() => {
-		// 			expect(API.templateVersionDynamicParameters).toHaveBeenCalledWith(
-		// 				customVersionId,
-		// 				MockUserOwner.id,
-		// 				expect.any(Object),
-		// 			);
-		// 		});
-		// 	});
-
-		// 	it("pre-fills workspace name from URL", async () => {
-		// 		const workspaceName = "my-custom-workspace";
-
-		// 		renderCreateWorkspacePageExperimental(
-		// 			`/templates/${MockTemplate.name}/workspace?name=${workspaceName}`,
-		// 		);
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		await waitFor(() => {
-		// 			const nameInput = screen.getByRole("textbox", {
-		// 				name: /workspace name/i,
-		// 			});
-		// 			expect(nameInput).toHaveValue(workspaceName);
-		// 		});
-		// 	});
-		// });
-
-		// describe("Template Presets", () => {
-		// 	const mockPreset = {
-		// 		ID: "preset-1",
-		// 		Name: "Development",
-		// 		description: "Development environment preset",
-		// 		Parameters: [
-		// 			{ Name: "instance_type", Value: "t3.small" },
-		// 			{ Name: "cpu_count", Value: "2" },
-		// 		],
-		// 		Default: false,
-		// 	};
-
-		// 	it("displays available presets", async () => {
-		// 		jest
-		// 			.spyOn(API, "getTemplateVersionPresets")
-		// 			.mockResolvedValue([mockPreset]);
-
-		// 		renderCreateWorkspacePageExperimental();
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		await waitFor(() => {
-		// 			expect(screen.getByText("Development")).toBeInTheDocument();
-		// 			expect(
-		// 				screen.getByText("Development environment preset"),
-		// 			).toBeInTheDocument();
-		// 		});
-		// 	});
-
-		// 	it("applies preset parameters when selected", async () => {
-		// 		jest
-		// 			.spyOn(API, "getTemplateVersionPresets")
-		// 			.mockResolvedValue([mockPreset]);
-
-		// 		renderCreateWorkspacePageExperimental();
-		// 		await waitForLoaderToBeRemoved();
-
-		// 		// Select preset
-		// 		const presetButton = screen.getByRole("button", { name: /development/i });
-		// 		await userEvent.click(presetButton);
-
-		// 		// Verify parameters are sent via WebSocket
-		// 		await waitFor(() => {
-		// 			expect(mockWebSocket.send).toHaveBeenCalledWith(
-		// 				expect.stringContaining('"instance_type":"t3.small"'),
-		// 			);
-		// 			expect(mockWebSocket.send).toHaveBeenCalledWith(
-		// 				expect.stringContaining('"cpu_count":"2"'),
-		// 			);
-		// 		});
-		// 	});
-		// });
 	});
 
-	// describe("Navigation", () => {
-	// 	it("navigates back when cancel is clicked", async () => {
-	// 		const { router } = renderCreateWorkspacePageExperimental();
-	// 		await waitForLoaderToBeRemoved();
+	describe("Initial Parameters", () => {
+		it("renders initial parameters correctly", async () => {
+			renderCreateWorkspacePageExperimental();
+			await waitForLoaderToBeRemoved();
 
-	// 		const cancelButton = screen.getByRole("button", { name: /cancel/i });
-	// 		await userEvent.click(cancelButton);
+			expect(API.templateVersionDynamicParameters).toHaveBeenCalledWith(
+				MockTemplate.active_version_id,
+				MockUserOwner.id,
+				expect.objectContaining({
+					onMessage: expect.any(Function),
+					onError: expect.any(Function),
+					onClose: expect.any(Function),
+				}),
+			);
 
-	// 		expect(router.state.location.pathname).not.toBe(
-	// 			`/templates/${MockTemplate.name}/workspace`,
-	// 		);
-	// 	});
+			await waitFor(() => {
+				expect(screen.getByText("Instance Type")).toBeInTheDocument();
+				expect(screen.getByText("CPU Count")).toBeInTheDocument();
+				expect(screen.getByText("Enable Monitoring")).toBeInTheDocument();
+				expect(screen.getByText("Tags")).toBeInTheDocument();
+			});
+		});
 
-	// 	it("navigates to workspace after successful creation", async () => {
-	// 		const { router } = renderCreateWorkspacePageExperimental();
-	// 		await waitForLoaderToBeRemoved();
+		it("sends initial parameter values exactly once", async () => {
+			renderCreateWorkspacePageExperimental();
+			await waitForLoaderToBeRemoved();
 
-	// 		const nameInput = screen.getByRole("textbox", {
-	// 			name: /workspace name/i,
-	// 		});
-	// 		await userEvent.clear(nameInput);
-	// 		await userEvent.type(nameInput, "my-test-workspace");
+			await waitFor(() => {
+				expect(mockWebSocket.send).toHaveBeenCalledTimes(1);
+				// The initial payload should include at least one of the default parameters
+				expect(mockWebSocket.send).toHaveBeenCalledWith(
+					expect.stringContaining("\"cpu_count\":\"2\""),
+				);
+			});
+		});
+	});
 
-	// 		// Submit form
-	// 		const createButton = screen.getByRole("button", {
-	// 			name: /create workspace/i,
-	// 		});
-	// 		await userEvent.click(createButton);
+	describe("URL Parameters", () => {
+		it("pre-fills parameters from URL", async () => {
+			renderCreateWorkspacePageExperimental(
+				`/templates/${MockTemplate.name}/workspace?param.instance_type=t3.large&param.cpu_count=4`,
+			);
+			await waitForLoaderToBeRemoved();
 
-	// 		await waitFor(() => {
-	// 			expect(router.state.location.pathname).toBe(
-	// 				`/@${MockWorkspace.owner_name}/${MockWorkspace.name}`,
-	// 			);
-	// 		});
-	// 	});
-	// });
+			await waitFor(() => {
+				// Verify parameters are pre-filled
+				// This would require checking the actual form values
+				expect(screen.getByText("Instance Type")).toBeInTheDocument();
+				expect(screen.getByText("CPU Count")).toBeInTheDocument();
+			});
+		});
 
-	// describe("Error Handling", () => {
-	// 	it("displays template loading errors", async () => {
-	// 		const errorMessage = "Template not found";
-	// 		jest.spyOn(API, "getTemplate").mockRejectedValue(new Error(errorMessage));
+		it("uses custom template version when specified", async () => {
+			const customVersionId = "custom-version-123";
 
-	// 		renderCreateWorkspacePageExperimental();
+			renderCreateWorkspacePageExperimental(
+				`/templates/${MockTemplate.name}/workspace?version=${customVersionId}`,
+			);
 
-	// 		await waitFor(() => {
-	// 			expect(screen.getByText(errorMessage)).toBeInTheDocument();
-	// 		});
-	// 	});
+			await waitFor(() => {
+				expect(API.templateVersionDynamicParameters).toHaveBeenCalledWith(
+					customVersionId,
+					MockUserOwner.id,
+					expect.any(Object),
+				);
+			});
+		});
 
-	// 	it("displays permission errors", async () => {
-	// 		const errorMessage = "Insufficient permissions";
-	// 		jest
-	// 			.spyOn(API, "checkAuthorization")
-	// 			.mockRejectedValue(new Error(errorMessage));
+		it("pre-fills workspace name from URL", async () => {
+			const workspaceName = "my-custom-workspace";
 
-	// 		renderCreateWorkspacePageExperimental();
+			renderCreateWorkspacePageExperimental(
+				`/templates/${MockTemplate.name}/workspace?name=${workspaceName}`,
+			);
+			await waitForLoaderToBeRemoved();
 
-	// 		await waitFor(() => {
-	// 			expect(screen.getByText(errorMessage)).toBeInTheDocument();
-	// 		});
-	// 	});
+			await waitFor(() => {
+				const nameInput = screen.getByRole("textbox", {
+					name: /workspace name/i,
+				});
+				expect(nameInput).toHaveValue(workspaceName);
+			});
+		});
+	});
 
-	// 	it("allows error reset", async () => {
-	// 		const errorMessage = "Creation failed";
-	// 		jest
-	// 			.spyOn(API, "createWorkspace")
-	// 			.mockRejectedValue(new Error(errorMessage));
+	describe("Disabled Parameters", () => {
+		it("does not render parameters specified in disable_params query", async () => {
+			// Disable the CPU Count parameter via the URL
+			renderCreateWorkspacePageExperimental(
+				`/templates/${MockTemplate.name}/workspace?disable_params=cpu_count`,
+			);
 
-	// 		renderCreateWorkspacePageExperimental();
-	// 		await waitForLoaderToBeRemoved();
+			await waitForLoaderToBeRemoved();
 
-	// 		// Trigger error
-	// 		const createButton = screen.getByRole("button", {
-	// 			name: /create workspace/i,
-	// 		});
-	// 		await userEvent.click(createButton);
+			// CPU Count should be hidden
+			expect(screen.queryByText(/cpu count/i)).not.toBeInTheDocument();
 
-	// 		await waitFor(() => {
-	// 			expect(screen.getByText(errorMessage)).toBeInTheDocument();
-	// 		});
-
-	// 		// Reset error
-	// 		jest.spyOn(API, "createWorkspace").mockResolvedValue(MockWorkspace);
-	// 		const errorBanner = screen.getByRole("alert");
-	// 		const tryAgainButton = within(errorBanner).getByRole("button", {
-	// 			name: /try again/i,
-	// 		});
-	// 		await userEvent.click(tryAgainButton);
-
-	// 		await waitFor(() => {
-	// 			expect(screen.queryByText(errorMessage)).not.toBeInTheDocument();
-	// 		});
-	// 	});
-	// });
+			// Other parameters should still be visible
+			expect(screen.getByText(/instance type/i)).toBeInTheDocument();
+		});
+	});
 });
