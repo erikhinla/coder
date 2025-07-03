@@ -1,8 +1,16 @@
-import type { Workspace } from "api/typesGenerated";
-import { type FC, type ReactNode, Suspense, useState } from "react";
+import type { Workspace, WorkspaceStatus } from "api/typesGenerated";
+import {
+	type FC,
+	forwardRef,
+	type ReactNode,
+	Suspense,
+	useId,
+	useRef,
+	useState,
+} from "react";
 import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
 import { Button } from "components/Button/Button";
-import { useSuspenseQueries } from "react-query";
+import { useQueries, useSuspenseQueries } from "react-query";
 import { templateVersion } from "api/queries/templates";
 import { Loader } from "components/Loader/Loader";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
@@ -11,6 +19,7 @@ import { cn } from "utils/cn";
 import { Checkbox } from "components/Checkbox/Checkbox";
 import { Badge } from "components/Badge/Badge";
 import { Label } from "@radix-ui/react-label";
+import { Spinner } from "components/Spinner/Spinner";
 
 /**
  * @todo Need to decide if we should include the template display name here, or
@@ -133,7 +142,7 @@ const TemplateNameChange: FC<TemplateNameChangeProps> = ({
 	return (
 		<>
 			<span aria-hidden>
-				Template: {oldTemplateName} &rarr; {newTemplateName}
+				{oldTemplateName} &rarr; {newTemplateName}
 			</span>
 			<span className="sr-only">
 				Template {oldTemplateName} will be updated to template {newTemplateName}
@@ -147,10 +156,10 @@ type RunningWorkspacesWarningProps = Readonly<{
 	onAcceptedConsequencesChange: (newValue: boolean) => void;
 }>;
 
-const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
-	acceptedConsequences,
-	onAcceptedConsequencesChange,
-}) => {
+const RunningWorkspacesWarning = forwardRef<
+	HTMLButtonElement,
+	RunningWorkspacesWarningProps
+>(({ acceptedConsequences, onAcceptedConsequencesChange }, ref) => {
 	return (
 		<div className="rounded-md border-border-warning border border-solid p-4">
 			<h4 className="m-0 font-semibold">Running workspaces detected</h4>
@@ -167,6 +176,7 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 			</ul>
 			<Label className="flex flex-row gap-2 items-center pt-4">
 				<Checkbox
+					ref={ref}
 					className="border-border-warning bg-surface-orange"
 					checked={acceptedConsequences}
 					onCheckedChange={onAcceptedConsequencesChange}
@@ -175,7 +185,19 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 			</Label>
 		</div>
 	);
-};
+});
+
+// Used to force the user to acknowledge that batch updating has risks in
+// certain situations and could destroy their data
+type ConsequencesStage = "notAccepted" | "accepted" | "failedValidation";
+
+const transitioningStatuses: readonly WorkspaceStatus[] = [
+	"canceling",
+	"deleting",
+	"pending",
+	"starting",
+	"stopping",
+];
 
 type ReviewFormProps = Readonly<{
 	workspacesToUpdate: readonly Workspace[];
@@ -190,27 +212,31 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	onCancel,
 	onSubmit,
 }) => {
-	// We need to take a local snapshot of the workspaces that existed on mount
-	// because workspaces are such a mutable resource, and there's a chance that
-	// they can be changed by another user + be subject to a query invalidation
-	// while the form is open
-	const [cachedWorkspaces, setCachedWorkspaces] = useState(workspacesToUpdate);
-	// Used to force the user to acknowledge that batch updating has risks in
-	// certain situations and could destroy their data. Initial value
-	// deliberately *not* based on any derived values to avoid state sync issues
-	// as cachedWorkspaces gets refreshed
-	const [acceptedConsequences, setAcceptedConsequences] = useState(false);
+	const hookId = useId();
+	const [stage, setStage] = useState<ConsequencesStage>("notAccepted");
+	const checkboxRef = useRef<HTMLButtonElement>(null);
+
+	// We have to make sure that we don't let the user submit anything while
+	// workspaces are transitioning, or else we'll run into a race condition.
+	// If a user starts a workspace, and then immediately batch-updates it, the
+	// workspace won't be in the running state yet. We need to issue warnings
+	// about how updating running workspaces is a destructive action, but if
+	// the user goes through the form quickly enough, they'll be able to update
+	// without seeing the warning
+	const transitioning = workspacesToUpdate.filter((ws) =>
+		transitioningStatuses.includes(ws.latest_build.status),
+	);
 
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
 	// then skip over them for all other update logic
 	const { dormant, noUpdateNeeded, readyToUpdate } =
-		separateWorkspacesByUpdateType(cachedWorkspaces);
+		separateWorkspacesByUpdateType(workspacesToUpdate);
 
 	// The workspaces don't have all necessary data by themselves, so we need to
 	// fetch the unique template versions, and massage the results
 	const groups = groupWorkspacesByTemplateVersionId(readyToUpdate);
-	const templateVersionQueries = useSuspenseQueries({
+	const templateVersionQueries = useQueries({
 		queries: groups.map((g) => templateVersion(g.templateVersionId)),
 	});
 
@@ -219,19 +245,15 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 
-	const merged = templateVersionQueries.every((q) => q.isSuccess)
-		? templateVersionQueries.map((q) => q.data)
-		: undefined;
-
 	const runningIds = new Set<string>(
 		readyToUpdate
 			.filter((ws) => ws.latest_build.status === "running")
 			.map((ws) => ws.id),
 	);
 
+	const failedValidationId = `${hookId}-failed-validation`;
 	const hasRunningWorkspaces = runningIds.size > 0;
-	const consequencesResolved = !hasRunningWorkspaces || acceptedConsequences;
-	const workspacesChangedWhileOpen = workspacesToUpdate !== cachedWorkspaces;
+	const consequencesResolved = !hasRunningWorkspaces || stage === "accepted";
 	const canSubmit =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
@@ -240,7 +262,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			className="max-h-[80vh]"
 			onSubmit={(e) => {
 				e.preventDefault();
-				onSubmit();
+				if (canSubmit) {
+					onSubmit();
+					return;
+				}
+				if (stage === "notAccepted") {
+					setStage("failedValidation");
+					checkboxRef.current?.scrollIntoView();
+				}
 			}}
 		>
 			{error !== undefined ? (
@@ -254,26 +283,15 @@ const ReviewForm: FC<ReviewFormProps> = ({
 									Review updates
 								</h3>
 							</DialogTitle>
-
-							<Button
-								variant="outline"
-								size="sm"
-								disabled={!workspacesChangedWhileOpen}
-								onClick={() => {
-									setCachedWorkspaces(workspacesToUpdate);
-									setAcceptedConsequences(false);
-								}}
-							>
-								Refresh list
-							</Button>
 						</div>
 
 						{hasRunningWorkspaces && (
 							<div className="pb-2">
 								<RunningWorkspacesWarning
-									acceptedConsequences={acceptedConsequences}
-									onAcceptedConsequencesChange={(newValue) => {
-										setAcceptedConsequences(newValue);
+									acceptedConsequences={stage === "accepted"}
+									onAcceptedConsequencesChange={(newChecked) => {
+										const newStage = newChecked ? "accepted" : "notAccepted";
+										setStage(newStage);
 									}}
 								/>
 							</div>
@@ -379,13 +397,39 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						)}
 					</div>
 
-					<div className="flex flex-row flex-wrap justify-end gap-4 border-0 border-t border-solid border-t-border pt-8">
-						<Button variant="outline" onClick={onCancel}>
-							Cancel
-						</Button>
-						<Button variant="default" type="submit" disabled={!canSubmit}>
-							Update
-						</Button>
+					<div className="border-0 border-t border-solid border-t-border pt-8">
+						<div className="flex flex-row flex-wrap justify-end gap-4">
+							<Button variant="outline" onClick={onCancel}>
+								Cancel
+							</Button>
+							<Button
+								variant="default"
+								type="submit"
+								disabled={isProcessing}
+								aria-describedby={
+									stage === "failedValidation" ? failedValidationId : undefined
+								}
+							>
+								{isProcessing && (
+									<>
+										<Spinner loading />
+										<span className="sr-only">
+											Waiting for workspaces to finish processing
+										</span>
+									</>
+								)}
+								<span aria-hidden={isProcessing}>Update</span>
+							</Button>
+						</div>
+
+						{stage === "failedValidation" && (
+							<p
+								id={failedValidationId}
+								className="m-0 text-highlight-red text-right text-sm pt-2"
+							>
+								Please check the checkbox to continue.
+							</p>
+						)}
 					</div>
 				</>
 			)}
@@ -394,10 +438,10 @@ const ReviewForm: FC<ReviewFormProps> = ({
 };
 
 type BatchUpdateModalFormProps = Readonly<{
-	workspacesToUpdate: readonly Workspace[];
 	open: boolean;
 	isProcessing: boolean;
-	onClose: () => void;
+	workspacesToUpdate: readonly Workspace[];
+	onCancel: () => void;
 	onSubmit: () => void;
 }>;
 
@@ -405,40 +449,25 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 	open,
 	isProcessing,
 	workspacesToUpdate,
-	onClose,
+	onCancel,
 	onSubmit,
 }) => {
-	// Splitting up the component so that we (1) we only mount the state when
-	// we know a user actually opened the dialog content, and (2) so it's easy
-	// to add a Suspense boundary for the data fetching
 	return (
 		<Dialog
 			open={open}
 			onOpenChange={() => {
 				if (open) {
-					onClose();
+					onCancel();
 				}
 			}}
 		>
 			<DialogContent className="max-w-screen-md">
-				<Suspense
-					fallback={
-						<>
-							<DialogTitle>Loading&hellip;</DialogTitle>
-							<Loader />
-						</>
-					}
-				>
-					<ReviewForm
-						workspacesToUpdate={workspacesToUpdate}
-						isProcessing={isProcessing}
-						onCancel={onClose}
-						onSubmit={() => {
-							onSubmit();
-							onClose();
-						}}
-					/>
-				</Suspense>
+				<ReviewForm
+					workspacesToUpdate={workspacesToUpdate}
+					isProcessing={isProcessing}
+					onCancel={onCancel}
+					onSubmit={onSubmit}
+				/>
 			</DialogContent>
 		</Dialog>
 	);
