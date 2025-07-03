@@ -40,9 +40,10 @@ type BatchAction = "delete" | "update";
 const WorkspacesPage: FC = () => {
 	const queryClient = useQueryClient();
 	// We have to be careful with how we use useSearchParams or any other
-	// derived hooks. The URL is global state, but useSearchParams gives back a
-	// different state value based on where the hook was mounted. If we call the
-	// hook in the other hooks, we'll have multiple conflicting sources of truth
+	// derived hooks. The URL is global state, but each call to useSearchParams
+	// creates a different, contradictory source of truth for what the URL
+	// should look like. We need to make sure that we only mount the hook once
+	// per page
 	const [searchParams, setSearchParams] = useSafeSearchParams();
 	// Always need to make sure that we reset the checked workspaces each time
 	// the filtering or pagination changes, as that will almost always change
