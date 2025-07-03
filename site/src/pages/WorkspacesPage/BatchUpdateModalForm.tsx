@@ -152,7 +152,7 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 				Running workspaces detected
 			</h4>
 
-			<ul className="flex flex-col gap-1 m-0 p-5 [&>li]:leading-snug text-content-secondary pt-1">
+			<ul className="flex flex-col gap-1 m-0 px-5 pt-1.5 [&>li]:leading-snug text-content-secondary">
 				<li>
 					Updating a workspace will start it on its latest template version.
 					This can delete non-persistent data.
@@ -164,7 +164,7 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 				<li>Any unsaved data will be lost.</li>
 			</ul>
 
-			<Label className="flex flex-row gap-3 items-center leading-tight">
+			<Label className="flex flex-row gap-3 items-center leading-tight pt-6">
 				<Checkbox
 					ref={checkboxRef}
 					checked={acceptedConsequences}
