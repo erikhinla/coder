@@ -317,7 +317,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								</div>
 
 								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{[...readyToUpdate, ...readyToUpdate].map((ws) => {
+									{readyToUpdate.map((ws) => {
 										const matchedQuery = templateVersionQueries.find(
 											(q) => q.data?.id === ws.template_active_version_id,
 										);
