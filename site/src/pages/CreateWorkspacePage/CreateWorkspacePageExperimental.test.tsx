@@ -1,5 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { describe, expect, it, jest, beforeAll, beforeEach, afterEach } from "@jest/globals";
 import { API } from "api/api";
 import type {
 	DynamicParametersResponse,
@@ -234,7 +235,7 @@ describe("CreateWorkspacePageExperimental", () => {
 
 		jest
 			.spyOn(API, "templateVersionDynamicParameters")
-			.mockImplementation((versionId, _ownerId, callbacks) => {
+			.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 				const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 				mockWebSocket = socket;
 				publisher = pub;
@@ -328,7 +329,7 @@ describe("CreateWorkspacePageExperimental", () => {
 		it("handles WebSocket error gracefully", async () => {
 			jest
 				.spyOn(API, "templateVersionDynamicParameters")
-				.mockImplementation((versionId, _ownerId, callbacks) => {
+				.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 					const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 					mockWebSocket = socket;
 					publisher = pub;
@@ -359,7 +360,7 @@ describe("CreateWorkspacePageExperimental", () => {
 		it("handles WebSocket close event", async () => {
 			jest
 				.spyOn(API, "templateVersionDynamicParameters")
-				.mockImplementation((versionId, _ownerId, callbacks) => {
+				.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 					const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 					mockWebSocket = socket;
 					publisher = pub;
@@ -387,7 +388,7 @@ describe("CreateWorkspacePageExperimental", () => {
 		it("only parameters from latest response are displayed", async () => {
 			jest
 				.spyOn(API, "templateVersionDynamicParameters")
-				.mockImplementation((versionId, _ownerId, callbacks) => {
+				.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 					const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 					mockWebSocket = socket;
 					publisher = pub;
@@ -545,7 +546,7 @@ describe("CreateWorkspacePageExperimental", () => {
 		it("displays parameter validation errors", async () => {
 			jest
 				.spyOn(API, "templateVersionDynamicParameters")
-				.mockImplementation((versionId, _ownerId, callbacks) => {
+				.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 					const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 					mockWebSocket = socket;
 					publisher = pub;
@@ -609,7 +610,7 @@ describe("CreateWorkspacePageExperimental", () => {
 
 			jest
 				.spyOn(API, "templateVersionDynamicParameters")
-				.mockImplementation((versionId, _ownerId, callbacks) => {
+				.mockImplementation((versionId: string, _ownerId: string, callbacks: any) => {
 					const [socket, pub] = createMockWebSocket(`ws://test/${versionId}`);
 					mockWebSocket = socket;
 					publisher = pub;
