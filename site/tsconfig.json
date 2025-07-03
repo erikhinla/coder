@@ -16,13 +16,9 @@
 		"skipLibCheck": true,
 		"strict": true,
 		"target": "es2020",
-		"baseUrl": "src/",
-		"paths": {
-			"@testing-library/react": ["../node_modules/@testing-library/react"],
-			"@testing-library/user-event": ["../node_modules/@testing-library/user-event"]
-		}
+		"baseUrl": "src/"
 	},
 	"include": ["**/*.ts", "**/*.tsx"],
 	"exclude": ["node_modules/", "_jest"],
-	"types": ["@emotion/react", "@testing-library/jest-dom", "testing-library__react", "testing-library__user-event", "jest", "node"]
+	"types": ["@emotion/react", "@testing-library/jest-dom", "testing-library__react", "testing-library__user-event", "@jest/globals", "jest", "node"]
 }
