@@ -241,7 +241,7 @@ const WorkspacesListSection: FC<WorkspacesListSectionProps> = ({
 	description,
 }) => {
 	return (
-		<section className="flex flex-col gap-2">
+		<section className="flex flex-col gap-3.5">
 			<div className="max-w-prose">
 				<h4 className="m-0">{headerText}</h4>
 				<p className="m-0 text-sm leading-snug text-content-secondary">
