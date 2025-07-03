@@ -51,8 +51,8 @@ interface WorkspacesPageViewProps {
 	onPageChange: (page: number) => void;
 	onCheckChange: (checkedWorkspaces: readonly Workspace[]) => void;
 	isRunningBatchAction: boolean;
-	onDeleteAll: () => void;
-	onUpdateAll: () => void;
+	onBatchDeleteStart: () => void;
+	onBatchUpdateStart: () => void;
 	onStartAll: () => void;
 	onStopAll: () => void;
 	canCheckWorkspaces: boolean;
@@ -74,8 +74,8 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 	page,
 	checkedWorkspaces,
 	onCheckChange,
-	onDeleteAll,
-	onUpdateAll,
+	onBatchDeleteStart,
+	onBatchUpdateStart,
 	onStopAll,
 	onStartAll,
 	isRunningBatchAction,
@@ -170,7 +170,7 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 									<SquareIcon /> Stop
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
-								<DropdownMenuItem onClick={onUpdateAll}>
+								<DropdownMenuItem onClick={onBatchUpdateStart}>
 									<CloudIcon
 										className="size-icon-sm"
 										data-testid="bulk-action-update"
@@ -179,7 +179,7 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									className="text-content-destructive focus:text-content-destructive"
-									onClick={onDeleteAll}
+									onClick={onBatchDeleteStart}
 								>
 									<TrashIcon /> Delete&hellip;
 								</DropdownMenuItem>

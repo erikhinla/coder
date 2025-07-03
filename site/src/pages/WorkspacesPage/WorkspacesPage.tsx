@@ -157,10 +157,10 @@ const WorkspacesPage: FC = () => {
 				onPageChange={pagination.goToPage}
 				filterProps={filterState}
 				isRunningBatchAction={batchActions.isProcessing}
-				onDeleteAll={() => setActiveBatchAction("delete")}
+				onBatchDeleteStart={() => setActiveBatchAction("delete")}
 				onStartAll={() => batchActions.start(checkedWorkspaces)}
 				onStopAll={() => batchActions.stop(checkedWorkspaces)}
-				onUpdateAll={() => {
+				onBatchUpdateStart={() => {
 					// Just because batch-updating can be really dangerous
 					// action for running workspaces, we're going to invalidate
 					// all relevant queries as a prefetch strategy before the
