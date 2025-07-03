@@ -87,7 +87,7 @@ const WorkspacesPage: FC = () => {
 		});
 	}, [templatesQuery.data, workspacePermissionsQuery.data]);
 
-	const filterProps = useWorkspacesFilter({
+	const filterState = useWorkspacesFilter({
 		searchParams,
 		onSearchParamsChange: setSearchParams,
 		onFilterChange: () => {
@@ -98,7 +98,7 @@ const WorkspacesPage: FC = () => {
 
 	const workspacesQueryOptions = workspaces({
 		...pagination,
-		q: filterProps.filter.query,
+		q: filterState.filter.query,
 	});
 	const { data, error, refetch } = useQuery({
 		...workspacesQueryOptions,
@@ -151,7 +151,7 @@ const WorkspacesPage: FC = () => {
 				page={pagination.page}
 				limit={pagination.limit}
 				onPageChange={pagination.goToPage}
-				filterProps={filterProps}
+				filterProps={filterState}
 				isRunningBatchAction={batchActions.isProcessing}
 				onDeleteAll={() => setActiveBatchAction("delete")}
 				onUpdateAll={() => setActiveBatchAction("update")}
