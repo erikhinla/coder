@@ -14,6 +14,7 @@ import {
 	DialogTitle,
 } from "components/Dialog/Dialog";
 import { Spinner } from "components/Spinner/Spinner";
+import { TriangleAlert } from "lucide-react";
 import {
 	type FC,
 	type ForwardedRef,
@@ -135,7 +136,6 @@ type RunningWorkspacesWarningProps = Readonly<{
 	checkboxRef: ForwardedRef<HTMLButtonElement>;
 	containerRef: ForwardedRef<HTMLDivElement>;
 }>;
-
 const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 	acceptedConsequences,
 	onAcceptedConsequencesChange,
@@ -147,8 +147,12 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 			ref={containerRef}
 			className="rounded-md border-border-warning border border-solid p-4"
 		>
-			<h4 className="m-0 font-semibold">Running workspaces detected</h4>
-			<ul className="flex flex-col gap-1 m-0 [&>li]:leading-snug text-content-secondary pt-1">
+			<h4 className="m-0 font-semibold flex flex-row items-center gap-2 text-content-primary">
+				<TriangleAlert className="text-content-warning" size={16} />
+				Running workspaces detected
+			</h4>
+
+			<ul className="flex flex-col gap-1 m-0 p-5 [&>li]:leading-snug text-content-secondary pt-1">
 				<li>
 					Updating a workspace will start it on its latest template version.
 					This can delete non-persistent data.
@@ -159,10 +163,10 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 				</li>
 				<li>Any unsaved data will be lost.</li>
 			</ul>
-			<Label className="flex flex-row gap-2 items-center pt-4">
+
+			<Label className="flex flex-row gap-3 items-center leading-tight">
 				<Checkbox
 					ref={checkboxRef}
-					className="border-border-warning bg-surface-orange"
 					checked={acceptedConsequences}
 					onCheckedChange={onAcceptedConsequencesChange}
 				/>
@@ -204,7 +208,7 @@ const ContainerBody: FC<ContainerBodyProps> = ({
 		// back as child padding so that there's no risk of the scrollbar
 		// covering up content when the container gets tall enough to overflow
 		<div className="overflow-y-auto flex flex-col gap-6 -mx-8 -mt-8 p-8">
-			<div className="flex flex-col">
+			<div className="flex flex-col gap-5">
 				<DialogTitle asChild>
 					<h3 className="text-3xl font-semibold m-0 leading-tight">
 						{headerText}
@@ -212,7 +216,7 @@ const ContainerBody: FC<ContainerBodyProps> = ({
 				</DialogTitle>
 
 				<DialogDescription
-					className={cn("m-0 pt-4 text-base", !showDescription && "sr-only")}
+					className={cn("m-0 text-base", !showDescription && "sr-only")}
 				>
 					{description}
 				</DialogDescription>
@@ -328,10 +332,6 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 
-	// The setup here is a little wonky because of accessibility. We need to
-	// make sure that we never mount a form if there's nothing for the user to
-	// ever meaningfully submit, but conditionally sharing styling/elements
-	// between form content and non-form content is awkward
 	const formIsNeeded = readyToUpdate.length > 0 || dormant.length > 0;
 	if (!formIsNeeded) {
 		return (
@@ -549,7 +549,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 							id={failedValidationId}
 							className="m-0 text-highlight-red text-right text-sm pt-2"
 						>
-							Please acknowledge consequence to continue.
+							Please acknowledge consequences to continue.
 						</p>
 					)}
 				</ContainerFooter>
