@@ -1,61 +1,27 @@
-import type { Workspace, WorkspaceStatus } from "api/typesGenerated";
+import { Label } from "@radix-ui/react-label";
+import { templateVersion } from "api/queries/templates";
+import type {
+	TemplateVersion,
+	Workspace,
+	WorkspaceStatus,
+} from "api/typesGenerated";
+import { ErrorAlert } from "components/Alert/ErrorAlert";
+import { Avatar } from "components/Avatar/Avatar";
+import { Badge } from "components/Badge/Badge";
+import { Button } from "components/Button/Button";
+import { Checkbox } from "components/Checkbox/Checkbox";
+import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
+import { Spinner } from "components/Spinner/Spinner";
 import {
 	type FC,
-	forwardRef,
 	type ReactNode,
-	Suspense,
+	forwardRef,
 	useId,
 	useRef,
 	useState,
 } from "react";
-import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
-import { Button } from "components/Button/Button";
-import { useQueries, useSuspenseQueries } from "react-query";
-import { templateVersion } from "api/queries/templates";
-import { Loader } from "components/Loader/Loader";
-import { ErrorAlert } from "components/Alert/ErrorAlert";
-import { Avatar } from "components/Avatar/Avatar";
+import { useQueries, type UseQueryOptions } from "react-query";
 import { cn } from "utils/cn";
-import { Checkbox } from "components/Checkbox/Checkbox";
-import { Badge } from "components/Badge/Badge";
-import { Label } from "@radix-ui/react-label";
-import { Spinner } from "components/Spinner/Spinner";
-
-/**
- * @todo Need to decide if we should include the template display name here, or
- * if we'll be able to get that data as part of other fetches. It's also
- * possible that the new UX might not require it at all?
- */
-type TemplateVersionGroup = Readonly<{
-	templateVersionId: string;
-	affectedWorkspaces: readonly Workspace[];
-}>;
-
-function groupWorkspacesByTemplateVersionId(
-	workspaces: readonly Workspace[],
-): readonly TemplateVersionGroup[] {
-	const grouped = new Map<string, TemplateVersionGroup>();
-
-	for (const ws of workspaces) {
-		const templateVersionId = ws.template_active_version_id;
-		const value = grouped.get(templateVersionId);
-		if (value !== undefined) {
-			// Need to do type assertion to make value mutable as an
-			// implementation detail. Doing things the "proper" way adds a bunch
-			// of needless boilerplate for a single-line computation
-			const target = value.affectedWorkspaces as Workspace[];
-			target.push(ws);
-			continue;
-		}
-
-		grouped.set(templateVersionId, {
-			templateVersionId,
-			affectedWorkspaces: [ws],
-		});
-	}
-
-	return [...grouped.values()];
-}
 
 type UpdateTypePartition = Readonly<{
 	dormant: readonly Workspace[];
@@ -88,7 +54,8 @@ function separateWorkspacesByUpdateType(
 type WorkspacePanelProps = Readonly<{
 	workspaceName: string;
 	workspaceIconUrl: string;
-	running?: boolean;
+	running: boolean;
+	transitioning: boolean;
 	label?: ReactNode;
 	adornment?: ReactNode;
 	className?: string;
@@ -98,11 +65,13 @@ const ReviewPanel: FC<WorkspacePanelProps> = ({
 	workspaceName,
 	label,
 	running,
+	transitioning,
 	workspaceIconUrl,
 	className,
 }) => {
-	// Preemptively adding border to this component so that it still looks
-	// decent when used outside of a list
+	// Preemptively adding border to this component to help decouple the styling
+	// from the rest of the components in this file, and make the core parts of
+	// this component easier to reason about
 	return (
 		<div
 			className={cn(
@@ -120,6 +89,11 @@ const ReviewPanel: FC<WorkspacePanelProps> = ({
 								Running
 							</Badge>
 						)}
+						{transitioning && (
+							<Badge size="xs" variant="warning" border="none">
+								Getting latest status
+							</Badge>
+						)}
 					</span>
 					<span className="text-xs leading-tight text-content-secondary">
 						{label}
@@ -131,21 +105,22 @@ const ReviewPanel: FC<WorkspacePanelProps> = ({
 };
 
 type TemplateNameChangeProps = Readonly<{
-	oldTemplateName: string;
-	newTemplateName: string;
+	oldTemplateVersionName: string;
+	newTemplateVersionName: string;
 }>;
 
 const TemplateNameChange: FC<TemplateNameChangeProps> = ({
-	oldTemplateName,
-	newTemplateName,
+	oldTemplateVersionName: oldTemplateName,
+	newTemplateVersionName: newTemplateName,
 }) => {
 	return (
 		<>
-			<span aria-hidden>
+			<span aria-hidden className="line-clamp-1">
 				{oldTemplateName} &rarr; {newTemplateName}
 			</span>
 			<span className="sr-only">
-				Template {oldTemplateName} will be updated to template {newTemplateName}
+				Workspace will go from version {oldTemplateName} to version{" "}
+				{newTemplateName}
 			</span>
 		</>
 	);
@@ -191,6 +166,13 @@ const RunningWorkspacesWarning = forwardRef<
 // certain situations and could destroy their data
 type ConsequencesStage = "notAccepted" | "accepted" | "failedValidation";
 
+// We have to make sure that we don't let the user submit anything while
+// workspaces are transitioning, or else we'll run into a race condition. If a
+// user starts a workspace, and then immediately batch-updates it, the workspace
+// won't be in the running state yet. We need to issue warnings about how
+// updating running workspaces is a destructive action, but if the user goes
+// through the form quickly enough, they'll be able to update without seeing the
+// warning.
 const transitioningStatuses: readonly WorkspaceStatus[] = [
 	"canceling",
 	"deleting",
@@ -216,17 +198,6 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const [stage, setStage] = useState<ConsequencesStage>("notAccepted");
 	const checkboxRef = useRef<HTMLButtonElement>(null);
 
-	// We have to make sure that we don't let the user submit anything while
-	// workspaces are transitioning, or else we'll run into a race condition.
-	// If a user starts a workspace, and then immediately batch-updates it, the
-	// workspace won't be in the running state yet. We need to issue warnings
-	// about how updating running workspaces is a destructive action, but if
-	// the user goes through the form quickly enough, they'll be able to update
-	// without seeing the warning
-	const transitioning = workspacesToUpdate.filter((ws) =>
-		transitioningStatuses.includes(ws.latest_build.status),
-	);
-
 	// Dormant workspaces can't be activated without activating them first. For
 	// now, we'll only show the user that some workspaces can't be updated, and
 	// then skip over them for all other update logic
@@ -235,9 +206,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 
 	// The workspaces don't have all necessary data by themselves, so we need to
 	// fetch the unique template versions, and massage the results
-	const groups = groupWorkspacesByTemplateVersionId(readyToUpdate);
+	const uniqueTemplateVersionIds = new Set<string>(
+		readyToUpdate.map((ws) => ws.template_active_version_id),
+	);
 	const templateVersionQueries = useQueries({
-		queries: groups.map((g) => templateVersion(g.templateVersionId)),
+		queries: [...uniqueTemplateVersionIds].map((id) => templateVersion(id)),
 	});
 
 	// React Query persists previous errors even if a query is no longer in the
@@ -251,10 +224,20 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			.map((ws) => ws.id),
 	);
 
+	// Just to be on the safe side, we need to derive the IDs from all checked
+	// workspaces, because the separation result could theoretically change
+	// after the transitions end
+	const transitioningIds = new Set<string>(
+		workspacesToUpdate
+			.filter((ws) => transitioningStatuses.includes(ws.latest_build.status))
+			.map((ws) => ws.id),
+	);
+
 	const failedValidationId = `${hookId}-failed-validation`;
 	const hasRunningWorkspaces = runningIds.size > 0;
 	const consequencesResolved = !hasRunningWorkspaces || stage === "accepted";
-	const canSubmit =
+	const submitButtonDisabled = isProcessing || transitioningIds.size > 0;
+	const submitIsPossible =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
 	return (
@@ -262,13 +245,16 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			className="max-h-[80vh]"
 			onSubmit={(e) => {
 				e.preventDefault();
-				if (canSubmit) {
+				if (submitIsPossible) {
 					onSubmit();
 					return;
 				}
 				if (stage === "notAccepted") {
 					setStage("failedValidation");
-					checkboxRef.current?.scrollIntoView();
+					// Makes sure that if the modal is long enough to scroll
+					// that the checkbox isn't on screen anymore, it goes back
+					// to being on screen
+					checkboxRef.current?.scrollIntoView({ behavior: "smooth" });
 				}
 			}}
 		>
@@ -290,8 +276,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								<RunningWorkspacesWarning
 									acceptedConsequences={stage === "accepted"}
 									onAcceptedConsequencesChange={(newChecked) => {
-										const newStage = newChecked ? "accepted" : "notAccepted";
-										setStage(newStage);
+										if (newChecked) {
+											setStage("accepted");
+										} else {
+											setStage("notAccepted");
+										}
 									}}
 								/>
 							</div>
@@ -302,8 +291,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								<div className="max-w-prose">
 									<h4 className="m-0">Ready to update</h4>
 									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces require no additional build parameters to
-										update.
+										These workspaces will have their templates be updated to the
+										latest version.
 									</p>
 								</div>
 
@@ -322,13 +311,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 												<ReviewPanel
 													className="border-none"
 													running={runningIds.has(ws.id)}
+													transitioning={transitioningIds.has(ws.id)}
 													workspaceName={ws.name}
 													workspaceIconUrl={ws.template_icon}
 													label={
 														newTemplateName !== undefined && (
 															<TemplateNameChange
-																newTemplateName={newTemplateName}
-																oldTemplateName={
+																newTemplateVersionName={newTemplateName}
+																oldTemplateVersionName={
 																	ws.latest_build.template_version_name
 																}
 															/>
@@ -359,6 +349,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 										>
 											<ReviewPanel
 												className="border-none"
+												running={false}
+												transitioning={transitioningIds.has(ws.id)}
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
 											/>
@@ -387,6 +379,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 										>
 											<ReviewPanel
 												className="border-none"
+												running={false}
+												transitioning={transitioningIds.has(ws.id)}
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
 											/>
@@ -405,12 +399,12 @@ const ReviewForm: FC<ReviewFormProps> = ({
 							<Button
 								variant="default"
 								type="submit"
-								disabled={isProcessing}
+								disabled={submitButtonDisabled}
 								aria-describedby={
 									stage === "failedValidation" ? failedValidationId : undefined
 								}
 							>
-								{isProcessing && (
+								{submitButtonDisabled && (
 									<>
 										<Spinner loading />
 										<span className="sr-only">
@@ -418,7 +412,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 										</span>
 									</>
 								)}
-								<span aria-hidden={isProcessing}>Update</span>
+								<span aria-hidden={submitButtonDisabled}>Update</span>
 							</Button>
 						</div>
 
@@ -462,6 +456,16 @@ export const BatchUpdateModalForm: FC<BatchUpdateModalFormProps> = ({
 			}}
 		>
 			<DialogContent className="max-w-screen-md">
+				{/*
+				 * Because of how the Dialog component works, we need to make
+				 * sure that at least the parent stays mounted at all times. But
+				 * if we move all the state into ReviewForm, that means that its
+				 * state only mounts when the user actually opens up the batch
+				 * update form. That saves us from mounting a bunch of extra
+				 * state and firing extra queries, when realistically, the form
+				 * will stay closed 99% of the time the user is on the
+				 * workspaces page.
+				 */}
 				<ReviewForm
 					workspacesToUpdate={workspacesToUpdate}
 					isProcessing={isProcessing}
