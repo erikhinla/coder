@@ -1,4 +1,5 @@
 import { Label } from "@radix-ui/react-label";
+import { Slot } from "@radix-ui/react-slot";
 import { templateVersion } from "api/queries/templates";
 import type { Workspace, WorkspaceStatus } from "api/typesGenerated";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
@@ -171,14 +172,28 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 	);
 };
 
-type MainContainerProps = Readonly<
+type ContainerProps = Readonly<
+	PropsWithChildren<{
+		asChild?: boolean;
+	}>
+>;
+const Container: FC<ContainerProps> = ({ children, asChild = false }) => {
+	const Wrapper = asChild ? Slot : "div";
+	return (
+		<Wrapper className="max-h-[80vh] flex flex-col flex-nowrap">
+			{children}
+		</Wrapper>
+	);
+};
+
+type ContainerBodyProps = Readonly<
 	PropsWithChildren<{
 		headerText: ReactNode;
 		description: ReactNode;
 		showDescription?: boolean;
 	}>
 >;
-const MainContainer: FC<MainContainerProps> = ({
+const ContainerBody: FC<ContainerBodyProps> = ({
 	children,
 	headerText,
 	description,
@@ -320,22 +335,21 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const formIsNeeded = readyToUpdate.length > 0 || dormant.length > 0;
 	if (!formIsNeeded) {
 		return (
-			// Top-level styles should stay in sync with <form> below
-			<div className="max-h-[80vh] flex flex-col flex-nowrap">
-				<MainContainer
+			<Container>
+				<ContainerBody
 					headerText="All workspaces up to date"
 					description="No updates needed"
 					showDescription
 				>
 					{error !== undefined && <ErrorAlert error={error} />}
-				</MainContainer>
+				</ContainerBody>
 
 				<ContainerFooter className="flex flex-row justify-end">
 					<Button variant="outline" onClick={onCancel}>
 						Close
 					</Button>
 				</ContainerFooter>
-			</div>
+			</Container>
 		);
 	}
 
@@ -368,178 +382,179 @@ const ReviewForm: FC<ReviewFormProps> = ({
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
 	return (
-		<form
-			className="max-h-[80vh] flex flex-col flex-nowrap"
-			onSubmit={(e) => {
-				e.preventDefault();
-				if (submitIsValid) {
-					onSubmit();
-					return;
-				}
-				if (stage === "accepted") {
-					return;
-				}
+		<Container asChild>
+			<form
+				onSubmit={(e) => {
+					e.preventDefault();
+					if (submitIsValid) {
+						onSubmit();
+						return;
+					}
+					if (stage === "accepted") {
+						return;
+					}
 
-				setStage("failedValidation");
-				// Makes sure that if the modal is long enough to scroll and if
-				// the warning section checkbox isn't on screen anymore, the
-				// warning section goes back to being on screen
-				consequencesContainerRef.current?.scrollIntoView({
-					behavior: "smooth",
-				});
-				consequencesCheckboxRef.current?.focus();
-			}}
-		>
-			<MainContainer
-				headerText="Review updates"
-				description="The following workspaces will be updated:"
+					setStage("failedValidation");
+					// Makes sure that if the modal is long enough to scroll and
+					// if the warning section checkbox isn't on screen anymore,
+					// the warning section goes back to being on screen
+					consequencesContainerRef.current?.scrollIntoView({
+						behavior: "smooth",
+					});
+					consequencesCheckboxRef.current?.focus();
+				}}
 			>
-				{error !== undefined ? (
-					<ErrorAlert error={error} />
-				) : (
-					<>
-						{hasRunningWorkspaces && (
-							<RunningWorkspacesWarning
-								checkboxRef={consequencesCheckboxRef}
-								containerRef={consequencesContainerRef}
-								acceptedConsequences={stage === "accepted"}
-								onAcceptedConsequencesChange={(newChecked) => {
-									if (newChecked) {
-										setStage("accepted");
-									} else {
-										setStage("notAccepted");
-									}
-								}}
-							/>
-						)}
+				<ContainerBody
+					headerText="Review updates"
+					description="The following workspaces will be updated:"
+				>
+					{error !== undefined ? (
+						<ErrorAlert error={error} />
+					) : (
+						<>
+							{hasRunningWorkspaces && (
+								<RunningWorkspacesWarning
+									checkboxRef={consequencesCheckboxRef}
+									containerRef={consequencesContainerRef}
+									acceptedConsequences={stage === "accepted"}
+									onAcceptedConsequencesChange={(newChecked) => {
+										if (newChecked) {
+											setStage("accepted");
+										} else {
+											setStage("notAccepted");
+										}
+									}}
+								/>
+							)}
 
-						{readyToUpdate.length > 0 && (
-							<WorkspacesListSection
-								headerText="Ready to update"
-								description="These workspaces will have their templates be updated to the latest version."
-							>
-								{readyToUpdate.map((ws) => {
-									const matchedQuery = templateVersionQueries.find(
-										(q) => q.data?.id === ws.template_active_version_id,
-									);
-									const newTemplateName = matchedQuery?.data?.name;
+							{readyToUpdate.length > 0 && (
+								<WorkspacesListSection
+									headerText="Ready to update"
+									description="These workspaces will have their templates be updated to the latest version."
+								>
+									{readyToUpdate.map((ws) => {
+										const matchedQuery = templateVersionQueries.find(
+											(q) => q.data?.id === ws.template_active_version_id,
+										);
+										const newTemplateName = matchedQuery?.data?.name;
 
-									return (
+										return (
+											<li
+												key={ws.id}
+												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+											>
+												<ReviewPanel
+													className="border-none"
+													running={runningIds.has(ws.id)}
+													transitioning={transitioningIds.has(ws.id)}
+													workspaceName={ws.name}
+													workspaceIconUrl={ws.template_icon}
+													label={
+														newTemplateName !== undefined && (
+															<TemplateNameChange
+																newTemplateVersionName={newTemplateName}
+																oldTemplateVersionName={
+																	ws.latest_build.template_version_name
+																}
+															/>
+														)
+													}
+												/>
+											</li>
+										);
+									})}
+								</WorkspacesListSection>
+							)}
+
+							{noUpdateNeeded.length > 0 && (
+								<WorkspacesListSection
+									headerText="Already updated"
+									description="These workspaces are already updated and will be skipped."
+								>
+									{noUpdateNeeded.map((ws) => (
 										<li
 											key={ws.id}
 											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
 										>
 											<ReviewPanel
 												className="border-none"
-												running={runningIds.has(ws.id)}
+												running={false}
 												transitioning={transitioningIds.has(ws.id)}
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
-												label={
-													newTemplateName !== undefined && (
-														<TemplateNameChange
-															newTemplateVersionName={newTemplateName}
-															oldTemplateVersionName={
-																ws.latest_build.template_version_name
-															}
-														/>
-													)
-												}
 											/>
 										</li>
-									);
-								})}
-							</WorkspacesListSection>
-						)}
+									))}
+								</WorkspacesListSection>
+							)}
 
-						{noUpdateNeeded.length > 0 && (
-							<WorkspacesListSection
-								headerText="Already updated"
-								description="These workspaces are already updated and will be skipped."
-							>
-								{noUpdateNeeded.map((ws) => (
-									<li
-										key={ws.id}
-										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-									>
-										<ReviewPanel
-											className="border-none"
-											running={false}
-											transitioning={transitioningIds.has(ws.id)}
-											workspaceName={ws.name}
-											workspaceIconUrl={ws.template_icon}
-										/>
-									</li>
-								))}
-							</WorkspacesListSection>
-						)}
+							{dormant.length > 0 && (
+								<WorkspacesListSection
+									headerText="Dormant workspaces"
+									description={
+										<>
+											Dormant workspaces cannot be updated without first
+											activating the workspace. They will be skipped during the
+											batch update.
+										</>
+									}
+								>
+									{dormant.map((ws) => (
+										<li
+											key={ws.id}
+											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+										>
+											<ReviewPanel
+												className="border-none"
+												running={false}
+												transitioning={transitioningIds.has(ws.id)}
+												workspaceName={ws.name}
+												workspaceIconUrl={ws.template_icon}
+											/>
+										</li>
+									))}
+								</WorkspacesListSection>
+							)}
+						</>
+					)}
+				</ContainerBody>
 
-						{dormant.length > 0 && (
-							<WorkspacesListSection
-								headerText="Dormant workspaces"
-								description={
-									<>
-										Dormant workspaces cannot be updated without first
-										activating the workspace. They will be skipped during the
-										batch update.
-									</>
-								}
-							>
-								{dormant.map((ws) => (
-									<li
-										key={ws.id}
-										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-									>
-										<ReviewPanel
-											className="border-none"
-											running={false}
-											transitioning={transitioningIds.has(ws.id)}
-											workspaceName={ws.name}
-											workspaceIconUrl={ws.template_icon}
-										/>
-									</li>
-								))}
-							</WorkspacesListSection>
-						)}
-					</>
-				)}
-			</MainContainer>
+				<ContainerFooter>
+					<div className="flex flex-row flex-wrap justify-end gap-4">
+						<Button variant="outline" onClick={onCancel}>
+							Cancel
+						</Button>
+						<Button
+							variant="default"
+							type="submit"
+							disabled={submitButtonDisabled}
+							aria-describedby={
+								stage === "failedValidation" ? failedValidationId : undefined
+							}
+						>
+							{submitButtonDisabled && (
+								<>
+									<Spinner loading />
+									<span className="sr-only">
+										Waiting for workspaces to finish processing
+									</span>
+								</>
+							)}
+							<span aria-hidden={submitButtonDisabled}>Update</span>
+						</Button>
+					</div>
 
-			<ContainerFooter>
-				<div className="flex flex-row flex-wrap justify-end gap-4">
-					<Button variant="outline" onClick={onCancel}>
-						Cancel
-					</Button>
-					<Button
-						variant="default"
-						type="submit"
-						disabled={submitButtonDisabled}
-						aria-describedby={
-							stage === "failedValidation" ? failedValidationId : undefined
-						}
-					>
-						{submitButtonDisabled && (
-							<>
-								<Spinner loading />
-								<span className="sr-only">
-									Waiting for workspaces to finish processing
-								</span>
-							</>
-						)}
-						<span aria-hidden={submitButtonDisabled}>Update</span>
-					</Button>
-				</div>
-
-				{stage === "failedValidation" && (
-					<p
-						id={failedValidationId}
-						className="m-0 text-highlight-red text-right text-sm pt-2"
-					>
-						Please acknowledge consequence to continue.
-					</p>
-				)}
-			</ContainerFooter>
-		</form>
+					{stage === "failedValidation" && (
+						<p
+							id={failedValidationId}
+							className="m-0 text-highlight-red text-right text-sm pt-2"
+						>
+							Please acknowledge consequence to continue.
+						</p>
+					)}
+				</ContainerFooter>
+			</form>
+		</Container>
 	);
 };
 
