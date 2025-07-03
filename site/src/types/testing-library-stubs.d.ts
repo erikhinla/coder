@@ -1,7 +1,11 @@
 declare module "@testing-library/react" {
-  export * from "testing-library__react";
-  const _default: any;
-  export default _default;
+  // Minimal stub covering the utilities we actually use in tests.
+  export const screen: any;
+  export function waitFor<T = any>(
+    callback: () => Promise<T> | T,
+    options?: any,
+  ): Promise<T>;
+  export function render(...args: any[]): any;
 }
 
 declare module "@testing-library/user-event" {
