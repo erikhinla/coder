@@ -16,6 +16,7 @@ import { Spinner } from "components/Spinner/Spinner";
 import {
 	type FC,
 	type ForwardedRef,
+	PropsWithChildren,
 	type ReactNode,
 	useId,
 	useRef,
@@ -170,6 +171,58 @@ const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
 	);
 };
 
+type MainContainerProps = Readonly<
+	PropsWithChildren<{
+		headerText: ReactNode;
+		description: ReactNode;
+		showDescription?: boolean;
+	}>
+>;
+const MainContainer: FC<MainContainerProps> = ({
+	children,
+	headerText,
+	description,
+	showDescription = false,
+}) => {
+	return (
+		<div className="overflow-y-auto flex flex-col gap-2 pb-3">
+			<div className="flex flex-col pb-4">
+				<DialogTitle asChild>
+					<h3 className="text-3xl font-semibold m-0 leading-tight">
+						{headerText}
+					</h3>
+				</DialogTitle>
+
+				<DialogDescription
+					className={cn("m-0 pt-4 text-base", !showDescription && "sr-only")}
+				>
+					{description}
+				</DialogDescription>
+			</div>
+
+			{children}
+		</div>
+	);
+};
+
+type ContainerFooterProps = Readonly<
+	PropsWithChildren<{
+		className?: string;
+	}>
+>;
+const ContainerFooter: FC<ContainerFooterProps> = ({ children, className }) => {
+	return (
+		<div
+			className={cn(
+				"border-0 border-t border-solid border-t-border pt-8",
+				className,
+			)}
+		>
+			{children}
+		</div>
+	);
+};
+
 // Used to force the user to acknowledge that batch updating has risks in
 // certain situations and could destroy their data
 type ConsequencesStage = "notAccepted" | "accepted" | "failedValidation";
@@ -227,6 +280,32 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 
+	// The setup here is a little wonky because of accessibility. We need to
+	// make sure that we never mount a form if there's nothing for the user to
+	// ever meaningfully submit, but conditionally sharing styling/elements
+	// between form content and non-form content is awkward
+	const showForm = false && (readyToUpdate.length > 0 || dormant.length > 0);
+	if (!showForm) {
+		return (
+			// Top-level styles should stay in sync with <form> below
+			<div className="max-h-[80vh] flex flex-col flex-nowrap">
+				<MainContainer
+					headerText="All workspaces up to date"
+					description="No updates needed"
+					showDescription
+				>
+					{error !== undefined && <ErrorAlert error={error} />}
+				</MainContainer>
+
+				<ContainerFooter className="flex flex-row justify-end">
+					<Button variant="outline" onClick={onCancel}>
+						Close
+					</Button>
+				</ContainerFooter>
+			</div>
+		);
+	}
+
 	const runningIds = new Set<string>(
 		readyToUpdate
 			.filter((ws) => ws.latest_build.status === "running")
@@ -235,7 +314,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 
 	// Just to be on the safe side, we need to derive the IDs from all checked
 	// workspaces, because the separation result could theoretically change
-	// after the transitions end
+	// on re-render after any workspace state transitions end
 	const transitioningIds = new Set<string>(
 		workspacesToUpdate
 			.filter((ws) => transitioningStatuses.includes(ws.latest_build.status))
@@ -245,15 +324,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	const failedValidationId = `${hookId}-failed-validation`;
 	const hasRunningWorkspaces = runningIds.size > 0;
 	const consequencesResolved = !hasRunningWorkspaces || stage === "accepted";
-	const showForm = readyToUpdate.length > 0 && error === undefined;
 
 	// For UX/accessibility reasons, we're splitting hairs between whether a
-	// form submission seems possible, versus whether clicking the button will
-	// give the user useful results/feedback. If we do a blanket disable for the
+	// form submission seems valid, versus whether clicking the button will give
+	// the user useful results/feedback. If we do a blanket disable for the
 	// button, there's many cases where there's no way to give them feedback
 	// on how to get themselves unstuck.
 	const submitButtonDisabled = isProcessing || transitioningIds.size > 0;
-	const submitIsPossible =
+	const submitIsValid =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
 	return (
@@ -261,7 +339,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			className="max-h-[80vh] flex flex-col flex-nowrap"
 			onSubmit={(e) => {
 				e.preventDefault();
-				if (submitIsPossible) {
+				if (submitIsValid) {
 					onSubmit();
 					return;
 				}
@@ -279,169 +357,161 @@ const ReviewForm: FC<ReviewFormProps> = ({
 				consequencesCheckboxRef.current?.focus();
 			}}
 		>
-			{error !== undefined ? (
-				<ErrorAlert error={error} />
-			) : (
-				<div className="overflow-y-auto flex flex-col gap-2 pb-3">
-					<div className="flex flex-row justify-between items-center pb-4">
-						<DialogTitle asChild>
-							<h3 className="text-3xl font-semibold m-0 leading-tight">
-								Review updates
-							</h3>
-						</DialogTitle>
-						<DialogDescription className="sr-only">
-							The following workspaces will be updated:
-						</DialogDescription>
-					</div>
-
-					{hasRunningWorkspaces && (
-						<div className="pb-2">
-							<RunningWorkspacesWarning
-								checkboxRef={consequencesCheckboxRef}
-								containerRef={consequencesContainerRef}
-								acceptedConsequences={stage === "accepted"}
-								onAcceptedConsequencesChange={(newChecked) => {
-									if (newChecked) {
-										setStage("accepted");
-									} else {
-										setStage("notAccepted");
-									}
-								}}
-							/>
-						</div>
-					)}
-
-					{readyToUpdate.length > 0 && (
-						<section>
-							<div className="max-w-prose">
-								<h4 className="m-0">Ready to update</h4>
-								<p className="m-0 text-sm leading-snug text-content-secondary">
-									These workspaces will have their templates be updated to the
-									latest version.
-								</p>
+			<MainContainer
+				headerText="Review updates"
+				description="The following workspaces will be updated:"
+			>
+				{error !== undefined ? (
+					<ErrorAlert error={error} />
+				) : (
+					<>
+						{hasRunningWorkspaces && (
+							<div className="pb-2">
+								<RunningWorkspacesWarning
+									checkboxRef={consequencesCheckboxRef}
+									containerRef={consequencesContainerRef}
+									acceptedConsequences={stage === "accepted"}
+									onAcceptedConsequencesChange={(newChecked) => {
+										if (newChecked) {
+											setStage("accepted");
+										} else {
+											setStage("notAccepted");
+										}
+									}}
+								/>
 							</div>
+						)}
 
-							<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-								{readyToUpdate.map((ws) => {
-									const matchedQuery = templateVersionQueries.find(
-										(q) => q.data?.id === ws.template_active_version_id,
-									);
-									const newTemplateName = matchedQuery?.data?.name;
+						{readyToUpdate.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Ready to update</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										These workspaces will have their templates be updated to the
+										latest version.
+									</p>
+								</div>
 
-									return (
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
+									{readyToUpdate.map((ws) => {
+										const matchedQuery = templateVersionQueries.find(
+											(q) => q.data?.id === ws.template_active_version_id,
+										);
+										const newTemplateName = matchedQuery?.data?.name;
+
+										return (
+											<li
+												key={ws.id}
+												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+											>
+												<ReviewPanel
+													className="border-none"
+													running={runningIds.has(ws.id)}
+													transitioning={transitioningIds.has(ws.id)}
+													workspaceName={ws.name}
+													workspaceIconUrl={ws.template_icon}
+													label={
+														newTemplateName !== undefined && (
+															<TemplateNameChange
+																newTemplateVersionName={newTemplateName}
+																oldTemplateVersionName={
+																	ws.latest_build.template_version_name
+																}
+															/>
+														)
+													}
+												/>
+											</li>
+										);
+									})}
+								</ul>
+							</section>
+						)}
+
+						{noUpdateNeeded.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Already updated</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										These workspaces are already updated and will be skipped.
+									</p>
+								</div>
+
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
+									{noUpdateNeeded.map((ws) => (
 										<li
 											key={ws.id}
 											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
 										>
 											<ReviewPanel
 												className="border-none"
-												running={runningIds.has(ws.id)}
+												running={false}
 												transitioning={transitioningIds.has(ws.id)}
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
-												label={
-													newTemplateName !== undefined && (
-														<TemplateNameChange
-															newTemplateVersionName={newTemplateName}
-															oldTemplateVersionName={
-																ws.latest_build.template_version_name
-															}
-														/>
-													)
-												}
 											/>
 										</li>
-									);
-								})}
-							</ul>
-						</section>
-					)}
+									))}
+								</ul>
+							</section>
+						)}
 
-					{noUpdateNeeded.length > 0 && (
-						<section>
-							<div className="max-w-prose">
-								<h4 className="m-0">Already updated</h4>
-								<p className="m-0 text-sm leading-snug text-content-secondary">
-									These workspaces are already updated and will be skipped.
-								</p>
-							</div>
+						{dormant.length > 0 && (
+							<section>
+								<div className="max-w-prose">
+									<h4 className="m-0">Dormant workspaces</h4>
+									<p className="m-0 text-sm leading-snug text-content-secondary">
+										Dormant workspaces cannot be updated without first
+										activating the workspace. They will be skipped during the
+										batch update.
+									</p>
+								</div>
 
-							<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-								{noUpdateNeeded.map((ws) => (
-									<li
-										key={ws.id}
-										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-									>
-										<ReviewPanel
-											className="border-none"
-											running={false}
-											transitioning={transitioningIds.has(ws.id)}
-											workspaceName={ws.name}
-											workspaceIconUrl={ws.template_icon}
-										/>
-									</li>
-								))}
-							</ul>
-						</section>
-					)}
+								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
+									{dormant.map((ws) => (
+										<li
+											key={ws.id}
+											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+										>
+											<ReviewPanel
+												className="border-none"
+												running={false}
+												transitioning={transitioningIds.has(ws.id)}
+												workspaceName={ws.name}
+												workspaceIconUrl={ws.template_icon}
+											/>
+										</li>
+									))}
+								</ul>
+							</section>
+						)}
+					</>
+				)}
+			</MainContainer>
 
-					{dormant.length > 0 && (
-						<section>
-							<div className="max-w-prose">
-								<h4 className="m-0">Dormant workspaces</h4>
-								<p className="m-0 text-sm leading-snug text-content-secondary">
-									Dormant workspaces cannot be updated without first activating
-									the workspace. They will be skipped during the batch update.
-								</p>
-							</div>
-
-							<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-								{dormant.map((ws) => (
-									<li
-										key={ws.id}
-										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-									>
-										<ReviewPanel
-											className="border-none"
-											running={false}
-											transitioning={transitioningIds.has(ws.id)}
-											workspaceName={ws.name}
-											workspaceIconUrl={ws.template_icon}
-										/>
-									</li>
-								))}
-							</ul>
-						</section>
-					)}
-				</div>
-			)}
-
-			<div className="border-0 border-t border-solid border-t-border pt-8">
+			<ContainerFooter>
 				<div className="flex flex-row flex-wrap justify-end gap-4">
 					<Button variant="outline" onClick={onCancel}>
-						{showForm ? "Cancel" : "Close"}
+						Cancel
 					</Button>
-
-					{showForm && (
-						<Button
-							variant="default"
-							type="submit"
-							disabled={submitButtonDisabled}
-							aria-describedby={
-								stage === "failedValidation" ? failedValidationId : undefined
-							}
-						>
-							{submitButtonDisabled && (
-								<>
-									<Spinner loading />
-									<span className="sr-only">
-										Waiting for workspaces to finish processing
-									</span>
-								</>
-							)}
-							<span aria-hidden={submitButtonDisabled}>Update</span>
-						</Button>
-					)}
+					<Button
+						variant="default"
+						type="submit"
+						disabled={submitButtonDisabled}
+						aria-describedby={
+							stage === "failedValidation" ? failedValidationId : undefined
+						}
+					>
+						{submitButtonDisabled && (
+							<>
+								<Spinner loading />
+								<span className="sr-only">
+									Waiting for workspaces to finish processing
+								</span>
+							</>
+						)}
+						<span aria-hidden={submitButtonDisabled}>Update</span>
+					</Button>
 				</div>
 
 				{stage === "failedValidation" && (
@@ -452,7 +522,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						Please acknowledge consequence to continue.
 					</p>
 				)}
-			</div>
+			</ContainerFooter>
 		</form>
 	);
 };
