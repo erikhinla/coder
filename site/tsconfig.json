@@ -16,7 +16,11 @@
 		"skipLibCheck": true,
 		"strict": true,
 		"target": "es2020",
-		"baseUrl": "src/"
+		"baseUrl": "src/",
+		"paths": {
+			"@testing-library/react": ["node_modules/@testing-library/react"],
+			"@testing-library/user-event": ["node_modules/@testing-library/user-event"]
+		}
 	},
 	"include": ["**/*.ts", "**/*.tsx"],
 	"exclude": ["node_modules/", "_jest"],
