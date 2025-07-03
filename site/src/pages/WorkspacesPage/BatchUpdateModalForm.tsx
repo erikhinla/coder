@@ -10,7 +10,12 @@ import { Avatar } from "components/Avatar/Avatar";
 import { Badge } from "components/Badge/Badge";
 import { Button } from "components/Button/Button";
 import { Checkbox } from "components/Checkbox/Checkbox";
-import { Dialog, DialogContent, DialogTitle } from "components/Dialog/Dialog";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogTitle,
+} from "components/Dialog/Dialog";
 import { Spinner } from "components/Spinner/Spinner";
 import {
 	type FC,
@@ -269,6 +274,9 @@ const ReviewForm: FC<ReviewFormProps> = ({
 									Review updates
 								</h3>
 							</DialogTitle>
+							<DialogDescription className="sr-only">
+								The following workspaces will be updated:
+							</DialogDescription>
 						</div>
 
 						{hasRunningWorkspaces && (
