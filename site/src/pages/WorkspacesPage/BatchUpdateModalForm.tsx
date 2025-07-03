@@ -185,7 +185,10 @@ const MainContainer: FC<MainContainerProps> = ({
 	showDescription = false,
 }) => {
 	return (
-		<div className="overflow-y-auto flex flex-col gap-2 pb-3">
+		// Have to subtract padding via margin values and then add it back so
+		// that there's no risk of the scrollbar covering up content when the
+		// container gets tall enough to overflow
+		<div className="overflow-y-auto flex flex-col gap-2 pb-3 -mx-8 -mt-8 px-8 pt-8">
 			<div className="flex flex-col pb-4">
 				<DialogTitle asChild>
 					<h3 className="text-3xl font-semibold m-0 leading-tight">
@@ -214,7 +217,10 @@ const ContainerFooter: FC<ContainerFooterProps> = ({ children, className }) => {
 	return (
 		<div
 			className={cn(
-				"border-0 border-t border-solid border-t-border pt-8",
+				// Also have to subtract padding here to make sure footer is
+				// full-bleed, and there's no risk of the border getting
+				// confused for the outline of one of the panels
+				"border-0 border-t border-solid border-t-border pt-8 -mx-8 px-8",
 				className,
 			)}
 		>
@@ -284,8 +290,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// make sure that we never mount a form if there's nothing for the user to
 	// ever meaningfully submit, but conditionally sharing styling/elements
 	// between form content and non-form content is awkward
-	const showForm = false && (readyToUpdate.length > 0 || dormant.length > 0);
-	if (!showForm) {
+	const formIsNeeded = readyToUpdate.length > 0 || dormant.length > 0;
+	if (!formIsNeeded) {
 		return (
 			// Top-level styles should stay in sync with <form> below
 			<div className="max-h-[80vh] flex flex-col flex-nowrap">
