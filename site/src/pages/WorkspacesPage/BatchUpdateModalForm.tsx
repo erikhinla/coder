@@ -25,7 +25,7 @@ import {
 import { useQueries } from "react-query";
 import { cn } from "utils/cn";
 
-type UpdateTypePartition = Readonly<{
+type WorkspacePartitionByUpdateType = Readonly<{
 	dormant: readonly Workspace[];
 	noUpdateNeeded: readonly Workspace[];
 	readyToUpdate: readonly Workspace[];
@@ -33,7 +33,7 @@ type UpdateTypePartition = Readonly<{
 
 function separateWorkspacesByUpdateType(
 	workspaces: readonly Workspace[],
-): UpdateTypePartition {
+): WorkspacePartitionByUpdateType {
 	const noUpdateNeeded: Workspace[] = [];
 	const dormant: Workspace[] = [];
 	const readyToUpdate: Workspace[] = [];
@@ -53,7 +53,7 @@ function separateWorkspacesByUpdateType(
 	return { dormant, noUpdateNeeded, readyToUpdate };
 }
 
-type WorkspacePanelProps = Readonly<{
+type ReviewPanelProps = Readonly<{
 	workspaceName: string;
 	workspaceIconUrl: string;
 	running: boolean;
@@ -63,7 +63,7 @@ type WorkspacePanelProps = Readonly<{
 	className?: string;
 }>;
 
-const ReviewPanel: FC<WorkspacePanelProps> = ({
+const ReviewPanel: FC<ReviewPanelProps> = ({
 	workspaceName,
 	label,
 	running,
@@ -185,11 +185,11 @@ const MainContainer: FC<MainContainerProps> = ({
 	showDescription = false,
 }) => {
 	return (
-		// Have to subtract padding via margin values and then add it back so
-		// that there's no risk of the scrollbar covering up content when the
-		// container gets tall enough to overflow
-		<div className="overflow-y-auto flex flex-col gap-2 pb-3 -mx-8 -mt-8 px-8 pt-8">
-			<div className="flex flex-col pb-4">
+		// Have to subtract parent padding via margin values and then add it
+		// back as child padding so that there's no risk of the scrollbar
+		// covering up content when the container gets tall enough to overflow
+		<div className="overflow-y-auto flex flex-col gap-6 -mx-8 -mt-8 p-8">
+			<div className="flex flex-col">
 				<DialogTitle asChild>
 					<h3 className="text-3xl font-semibold m-0 leading-tight">
 						{headerText}
@@ -226,6 +226,33 @@ const ContainerFooter: FC<ContainerFooterProps> = ({ children, className }) => {
 		>
 			{children}
 		</div>
+	);
+};
+
+type WorkspacesListSectionProps = Readonly<
+	PropsWithChildren<{
+		headerText: ReactNode;
+		description: ReactNode;
+	}>
+>;
+const WorkspacesListSection: FC<WorkspacesListSectionProps> = ({
+	children,
+	headerText,
+	description,
+}) => {
+	return (
+		<section className="flex flex-col gap-2">
+			<div className="max-w-prose">
+				<h4 className="m-0">{headerText}</h4>
+				<p className="m-0 text-sm leading-snug text-content-secondary">
+					{description}
+				</p>
+			</div>
+
+			<ul className="m-0 list-none p-0 flex flex-col rounded-md border border-solid border-border">
+				{children}
+			</ul>
+		</section>
 	);
 };
 
@@ -372,124 +399,107 @@ const ReviewForm: FC<ReviewFormProps> = ({
 				) : (
 					<>
 						{hasRunningWorkspaces && (
-							<div className="pb-2">
-								<RunningWorkspacesWarning
-									checkboxRef={consequencesCheckboxRef}
-									containerRef={consequencesContainerRef}
-									acceptedConsequences={stage === "accepted"}
-									onAcceptedConsequencesChange={(newChecked) => {
-										if (newChecked) {
-											setStage("accepted");
-										} else {
-											setStage("notAccepted");
-										}
-									}}
-								/>
-							</div>
+							<RunningWorkspacesWarning
+								checkboxRef={consequencesCheckboxRef}
+								containerRef={consequencesContainerRef}
+								acceptedConsequences={stage === "accepted"}
+								onAcceptedConsequencesChange={(newChecked) => {
+									if (newChecked) {
+										setStage("accepted");
+									} else {
+										setStage("notAccepted");
+									}
+								}}
+							/>
 						)}
 
 						{readyToUpdate.length > 0 && (
-							<section>
-								<div className="max-w-prose">
-									<h4 className="m-0">Ready to update</h4>
-									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces will have their templates be updated to the
-										latest version.
-									</p>
-								</div>
+							<WorkspacesListSection
+								headerText="Ready to update"
+								description="These workspaces will have their templates be updated to the latest version."
+							>
+								{readyToUpdate.map((ws) => {
+									const matchedQuery = templateVersionQueries.find(
+										(q) => q.data?.id === ws.template_active_version_id,
+									);
+									const newTemplateName = matchedQuery?.data?.name;
 
-								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{readyToUpdate.map((ws) => {
-										const matchedQuery = templateVersionQueries.find(
-											(q) => q.data?.id === ws.template_active_version_id,
-										);
-										const newTemplateName = matchedQuery?.data?.name;
-
-										return (
-											<li
-												key={ws.id}
-												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-											>
-												<ReviewPanel
-													className="border-none"
-													running={runningIds.has(ws.id)}
-													transitioning={transitioningIds.has(ws.id)}
-													workspaceName={ws.name}
-													workspaceIconUrl={ws.template_icon}
-													label={
-														newTemplateName !== undefined && (
-															<TemplateNameChange
-																newTemplateVersionName={newTemplateName}
-																oldTemplateVersionName={
-																	ws.latest_build.template_version_name
-																}
-															/>
-														)
-													}
-												/>
-											</li>
-										);
-									})}
-								</ul>
-							</section>
+									return (
+										<li
+											key={ws.id}
+											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+										>
+											<ReviewPanel
+												className="border-none"
+												running={runningIds.has(ws.id)}
+												transitioning={transitioningIds.has(ws.id)}
+												workspaceName={ws.name}
+												workspaceIconUrl={ws.template_icon}
+												label={
+													newTemplateName !== undefined && (
+														<TemplateNameChange
+															newTemplateVersionName={newTemplateName}
+															oldTemplateVersionName={
+																ws.latest_build.template_version_name
+															}
+														/>
+													)
+												}
+											/>
+										</li>
+									);
+								})}
+							</WorkspacesListSection>
 						)}
 
 						{noUpdateNeeded.length > 0 && (
-							<section>
-								<div className="max-w-prose">
-									<h4 className="m-0">Already updated</h4>
-									<p className="m-0 text-sm leading-snug text-content-secondary">
-										These workspaces are already updated and will be skipped.
-									</p>
-								</div>
-
-								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{noUpdateNeeded.map((ws) => (
-										<li
-											key={ws.id}
-											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-										>
-											<ReviewPanel
-												className="border-none"
-												running={false}
-												transitioning={transitioningIds.has(ws.id)}
-												workspaceName={ws.name}
-												workspaceIconUrl={ws.template_icon}
-											/>
-										</li>
-									))}
-								</ul>
-							</section>
+							<WorkspacesListSection
+								headerText="Already updated"
+								description="These workspaces are already updated and will be skipped."
+							>
+								{noUpdateNeeded.map((ws) => (
+									<li
+										key={ws.id}
+										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+									>
+										<ReviewPanel
+											className="border-none"
+											running={false}
+											transitioning={transitioningIds.has(ws.id)}
+											workspaceName={ws.name}
+											workspaceIconUrl={ws.template_icon}
+										/>
+									</li>
+								))}
+							</WorkspacesListSection>
 						)}
 
 						{dormant.length > 0 && (
-							<section>
-								<div className="max-w-prose">
-									<h4 className="m-0">Dormant workspaces</h4>
-									<p className="m-0 text-sm leading-snug text-content-secondary">
+							<WorkspacesListSection
+								headerText="Dormant workspaces"
+								description={
+									<>
 										Dormant workspaces cannot be updated without first
 										activating the workspace. They will be skipped during the
 										batch update.
-									</p>
-								</div>
-
-								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{dormant.map((ws) => (
-										<li
-											key={ws.id}
-											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-										>
-											<ReviewPanel
-												className="border-none"
-												running={false}
-												transitioning={transitioningIds.has(ws.id)}
-												workspaceName={ws.name}
-												workspaceIconUrl={ws.template_icon}
-											/>
-										</li>
-									))}
-								</ul>
-							</section>
+									</>
+								}
+							>
+								{dormant.map((ws) => (
+									<li
+										key={ws.id}
+										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+									>
+										<ReviewPanel
+											className="border-none"
+											running={false}
+											transitioning={transitioningIds.has(ws.id)}
+											workspaceName={ws.name}
+											workspaceIconUrl={ws.template_icon}
+										/>
+									</li>
+								))}
+							</WorkspacesListSection>
 						)}
 					</>
 				)}
