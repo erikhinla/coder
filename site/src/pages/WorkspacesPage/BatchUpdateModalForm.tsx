@@ -1,10 +1,6 @@
 import { Label } from "@radix-ui/react-label";
 import { templateVersion } from "api/queries/templates";
-import type {
-	TemplateVersion,
-	Workspace,
-	WorkspaceStatus,
-} from "api/typesGenerated";
+import type { Workspace, WorkspaceStatus } from "api/typesGenerated";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { Avatar } from "components/Avatar/Avatar";
 import { Badge } from "components/Badge/Badge";
@@ -25,7 +21,7 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { useQueries, type UseQueryOptions } from "react-query";
+import { useQueries } from "react-query";
 import { cn } from "utils/cn";
 
 type UpdateTypePartition = Readonly<{
