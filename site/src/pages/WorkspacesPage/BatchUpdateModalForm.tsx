@@ -15,6 +15,7 @@ import {
 import { Spinner } from "components/Spinner/Spinner";
 import {
 	type FC,
+	ForwardedRef,
 	type ReactNode,
 	forwardRef,
 	useId,
@@ -130,14 +131,21 @@ const TemplateNameChange: FC<TemplateNameChangeProps> = ({
 type RunningWorkspacesWarningProps = Readonly<{
 	acceptedConsequences: boolean;
 	onAcceptedConsequencesChange: (newValue: boolean) => void;
+	checkboxRef: ForwardedRef<HTMLButtonElement>;
+	containerRef: ForwardedRef<HTMLDivElement>;
 }>;
 
-const RunningWorkspacesWarning = forwardRef<
-	HTMLButtonElement,
-	RunningWorkspacesWarningProps
->(({ acceptedConsequences, onAcceptedConsequencesChange }, ref) => {
+const RunningWorkspacesWarning: FC<RunningWorkspacesWarningProps> = ({
+	acceptedConsequences,
+	onAcceptedConsequencesChange,
+	checkboxRef,
+	containerRef,
+}) => {
 	return (
-		<div className="rounded-md border-border-warning border border-solid p-4">
+		<div
+			ref={containerRef}
+			className="rounded-md border-border-warning border border-solid p-4"
+		>
 			<h4 className="m-0 font-semibold">Running workspaces detected</h4>
 			<ul className="flex flex-col gap-1 m-0 [&>li]:leading-snug text-content-secondary pt-1">
 				<li>
@@ -152,7 +160,7 @@ const RunningWorkspacesWarning = forwardRef<
 			</ul>
 			<Label className="flex flex-row gap-2 items-center pt-4">
 				<Checkbox
-					ref={ref}
+					ref={checkboxRef}
 					className="border-border-warning bg-surface-orange"
 					checked={acceptedConsequences}
 					onCheckedChange={onAcceptedConsequencesChange}
@@ -161,7 +169,7 @@ const RunningWorkspacesWarning = forwardRef<
 			</Label>
 		</div>
 	);
-});
+};
 
 // Used to force the user to acknowledge that batch updating has risks in
 // certain situations and could destroy their data
@@ -197,6 +205,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 }) => {
 	const hookId = useId();
 	const [stage, setStage] = useState<ConsequencesStage>("notAccepted");
+	const consequencesContainerRef = useRef<HTMLDivElement>(null);
 	const checkboxRef = useRef<HTMLButtonElement>(null);
 
 	// Dormant workspaces can't be activated without activating them first. For
@@ -250,13 +259,18 @@ const ReviewForm: FC<ReviewFormProps> = ({
 					onSubmit();
 					return;
 				}
-				if (stage === "notAccepted") {
-					setStage("failedValidation");
-					// Makes sure that if the modal is long enough to scroll
-					// that the checkbox isn't on screen anymore, it goes back
-					// to being on screen
-					checkboxRef.current?.scrollIntoView({ behavior: "smooth" });
+				if (stage === "accepted") {
+					return;
 				}
+
+				setStage("failedValidation");
+				// Makes sure that if the modal is long enough to scroll
+				// that the checkbox isn't on screen anymore, it goes back
+				// to being on screen
+				consequencesContainerRef.current?.scrollIntoView({
+					behavior: "smooth",
+				});
+				checkboxRef.current?.focus();
 			}}
 		>
 			{error !== undefined ? (
@@ -278,6 +292,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						{hasRunningWorkspaces && (
 							<div className="pb-2">
 								<RunningWorkspacesWarning
+									checkboxRef={checkboxRef}
+									containerRef={consequencesContainerRef}
 									acceptedConsequences={stage === "accepted"}
 									onAcceptedConsequencesChange={(newChecked) => {
 										if (newChecked) {
@@ -301,7 +317,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								</div>
 
 								<ul className="list-none p-0 flex flex-col rounded-md border border-solid border-border">
-									{readyToUpdate.map((ws) => {
+									{[...readyToUpdate, ...readyToUpdate].map((ws) => {
 										const matchedQuery = templateVersionQueries.find(
 											(q) => q.data?.id === ws.template_active_version_id,
 										);
