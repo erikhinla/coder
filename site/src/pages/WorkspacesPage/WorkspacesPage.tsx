@@ -157,10 +157,10 @@ const WorkspacesPage: FC = () => {
 				onPageChange={pagination.goToPage}
 				filterProps={filterState}
 				isRunningBatchAction={batchActions.isProcessing}
-				onBatchDeleteStart={() => setActiveBatchAction("delete")}
-				onStartAll={() => batchActions.start(checkedWorkspaces)}
-				onStopAll={() => batchActions.stop(checkedWorkspaces)}
-				onBatchUpdateStart={() => {
+				onBatchDeleteTransition={() => setActiveBatchAction("delete")}
+				onBatchStartTransition={() => batchActions.start(checkedWorkspaces)}
+				onBatchStopTransition={() => batchActions.stop(checkedWorkspaces)}
+				onBatchUpdateTransition={() => {
 					// Just because batch-updating can be really dangerous
 					// action for running workspaces, we're going to invalidate
 					// all relevant queries as a prefetch strategy before the
@@ -174,9 +174,8 @@ const WorkspacesPage: FC = () => {
 						// super granular and make one call per workspace.
 						queryClient.invalidateQueries({
 							queryKey: [templateVersionRoot, ws.template_active_version_id],
-							type: "all",
 							exact: true,
-							stale: true,
+							type: "all",
 						});
 					}
 					setActiveBatchAction("update");

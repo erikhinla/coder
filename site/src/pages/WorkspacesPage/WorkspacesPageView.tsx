@@ -51,10 +51,10 @@ interface WorkspacesPageViewProps {
 	onPageChange: (page: number) => void;
 	onCheckChange: (checkedWorkspaces: readonly Workspace[]) => void;
 	isRunningBatchAction: boolean;
-	onBatchDeleteStart: () => void;
-	onBatchUpdateStart: () => void;
-	onStartAll: () => void;
-	onStopAll: () => void;
+	onBatchDeleteTransition: () => void;
+	onBatchUpdateTransition: () => void;
+	onBatchStartTransition: () => void;
+	onBatchStopTransition: () => void;
 	canCheckWorkspaces: boolean;
 	templatesFetchStatus: TemplateQuery["status"];
 	templates: TemplateQuery["data"];
@@ -74,10 +74,10 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 	page,
 	checkedWorkspaces,
 	onCheckChange,
-	onBatchDeleteStart,
-	onBatchUpdateStart,
-	onStopAll,
-	onStartAll,
+	onBatchDeleteTransition,
+	onBatchUpdateTransition,
+	onBatchStopTransition,
+	onBatchStartTransition,
 	isRunningBatchAction,
 	canCheckWorkspaces,
 	templates,
@@ -155,7 +155,7 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 												!mustUpdateWorkspace(w, canChangeVersions),
 										)
 									}
-									onClick={onStartAll}
+									onClick={onBatchStartTransition}
 								>
 									<PlayIcon /> Start
 								</DropdownMenuItem>
@@ -165,12 +165,12 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 											(w) => w.latest_build.status === "running",
 										)
 									}
-									onClick={onStopAll}
+									onClick={onBatchStopTransition}
 								>
 									<SquareIcon /> Stop
 								</DropdownMenuItem>
 								<DropdownMenuSeparator />
-								<DropdownMenuItem onClick={onBatchUpdateStart}>
+								<DropdownMenuItem onClick={onBatchUpdateTransition}>
 									<CloudIcon
 										className="size-icon-sm"
 										data-testid="bulk-action-update"
@@ -179,7 +179,7 @@ export const WorkspacesPageView: FC<WorkspacesPageViewProps> = ({
 								</DropdownMenuItem>
 								<DropdownMenuItem
 									className="text-content-destructive focus:text-content-destructive"
-									onClick={onBatchDeleteStart}
+									onClick={onBatchDeleteTransition}
 								>
 									<TrashIcon /> Delete&hellip;
 								</DropdownMenuItem>
