@@ -48,21 +48,6 @@ export const templates = (
 	};
 };
 
-const getTemplatesByOrganizationQueryKey = (
-	organization: string,
-	options?: GetTemplatesOptions,
-) => [organization, "templates", options?.deprecated];
-
-const templatesByOrganization = (
-	organization: string,
-	options: GetTemplatesOptions = {},
-) => {
-	return {
-		queryKey: getTemplatesByOrganizationQueryKey(organization, options),
-		queryFn: () => API.getTemplatesByOrganization(organization, options),
-	};
-};
-
 export const templateACL = (templateId: string) => {
 	return {
 		queryKey: ["templateAcl", templateId],
