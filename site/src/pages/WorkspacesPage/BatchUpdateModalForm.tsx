@@ -243,7 +243,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 
 	return (
 		<form
-			className="max-h-[80vh]"
+			className="max-h-[80vh] flex flex-col flex-nowrap"
 			onSubmit={(e) => {
 				e.preventDefault();
 				if (submitIsPossible) {
