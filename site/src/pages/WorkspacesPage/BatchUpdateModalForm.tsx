@@ -375,7 +375,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// For UX/accessibility reasons, we're splitting hairs between whether a
 	// form submission seems valid, versus whether clicking the button will give
 	// the user useful results/feedback. If we do a blanket disable for the
-	// button, there's many cases where there's no way to give them feedback
+	// button, there's many cases where there's no way to give the user feedback
 	// on how to get themselves unstuck.
 	const submitButtonDisabled = isProcessing || transitioningIds.size > 0;
 	const submitIsValid =
