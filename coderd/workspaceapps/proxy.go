@@ -344,13 +344,10 @@ func (s *Server) determineCORSBehavior(token *SignedToken, app appurl.Applicatio
 
 			switch behavior {
 			case codersdk.CORSBehaviorPassthru:
-				fmt.Println("passthru")
 				// Bypass the CORS middleware.
 				next.ServeHTTP(rw, r)
 				return
 			default:
-				fmt.Println("default cors")
-
 				// Apply the CORS middleware.
 				corsHandler.ServeHTTP(rw, r)
 			}
