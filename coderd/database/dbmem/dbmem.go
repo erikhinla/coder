@@ -14,7 +14,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -23,9 +22,10 @@ import (
 	"golang.org/x/exp/maps"
 	"golang.org/x/xerrors"
 
+	"github.com/coder/coder/v2/coderd/notifications/types"
+
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
-	"github.com/coder/coder/v2/coderd/notifications/types"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/regosql"
 	"github.com/coder/coder/v2/coderd/util/slice"
@@ -51,127 +51,7 @@ var (
 
 // New returns an in-memory fake of the database.
 func New() database.Store {
-	q := &FakeQuerier{
-		mutex: &sync.RWMutex{},
-		data: &data{
-			apiKeys:                        make([]database.APIKey, 0),
-			auditLogs:                      make([]database.AuditLog, 0),
-			customRoles:                    make([]database.CustomRole, 0),
-			dbcryptKeys:                    make([]database.DBCryptKey, 0),
-			externalAuthLinks:              make([]database.ExternalAuthLink, 0),
-			files:                          make([]database.File, 0),
-			gitSSHKey:                      make([]database.GitSSHKey, 0),
-			groups:                         make([]database.Group, 0),
-			groupMembers:                   make([]database.GroupMemberTable, 0),
-			licenses:                       make([]database.License, 0),
-			locks:                          map[int64]struct{}{},
-			notificationMessages:           make([]database.NotificationMessage, 0),
-			notificationPreferences:        make([]database.NotificationPreference, 0),
-			organizationMembers:            make([]database.OrganizationMember, 0),
-			organizations:                  make([]database.Organization, 0),
-			inboxNotifications:             make([]database.InboxNotification, 0),
-			parameterSchemas:               make([]database.ParameterSchema, 0),
-			presets:                        make([]database.TemplateVersionPreset, 0),
-			presetParameters:               make([]database.TemplateVersionPresetParameter, 0),
-			presetPrebuildSchedules:        make([]database.TemplateVersionPresetPrebuildSchedule, 0),
-			provisionerDaemons:             make([]database.ProvisionerDaemon, 0),
-			provisionerJobs:                make([]database.ProvisionerJob, 0),
-			provisionerJobLogs:             make([]database.ProvisionerJobLog, 0),
-			provisionerKeys:                make([]database.ProvisionerKey, 0),
-			runtimeConfig:                  map[string]string{},
-			telemetryItems:                 make([]database.TelemetryItem, 0),
-			templateVersions:               make([]database.TemplateVersionTable, 0),
-			templateVersionTerraformValues: make([]database.TemplateVersionTerraformValue, 0),
-			templates:                      make([]database.TemplateTable, 0),
-			users:                          make([]database.User, 0),
-			userConfigs:                    make([]database.UserConfig, 0),
-			userStatusChanges:              make([]database.UserStatusChange, 0),
-			workspaceAgents:                make([]database.WorkspaceAgent, 0),
-			workspaceResources:             make([]database.WorkspaceResource, 0),
-			workspaceModules:               make([]database.WorkspaceModule, 0),
-			workspaceResourceMetadata:      make([]database.WorkspaceResourceMetadatum, 0),
-			workspaceAgentStats:            make([]database.WorkspaceAgentStat, 0),
-			workspaceAgentLogs:             make([]database.WorkspaceAgentLog, 0),
-			workspaceBuilds:                make([]database.WorkspaceBuild, 0),
-			workspaceApps:                  make([]database.WorkspaceApp, 0),
-			workspaceAppAuditSessions:      make([]database.WorkspaceAppAuditSession, 0),
-			workspaces:                     make([]database.WorkspaceTable, 0),
-			workspaceProxies:               make([]database.WorkspaceProxy, 0),
-		},
-	}
-	// Always start with a default org. Matching migration 198.
-	defaultOrg, err := q.InsertOrganization(context.Background(), database.InsertOrganizationParams{
-		ID:          uuid.New(),
-		Name:        "coder",
-		DisplayName: "Coder",
-		Description: "Builtin default organization.",
-		Icon:        "",
-		CreatedAt:   dbtime.Now(),
-		UpdatedAt:   dbtime.Now(),
-	})
-	if err != nil {
-		panic(xerrors.Errorf("failed to create default organization: %w", err))
-	}
-
-	_, err = q.InsertAllUsersGroup(context.Background(), defaultOrg.ID)
-	if err != nil {
-		panic(xerrors.Errorf("failed to create default group: %w", err))
-	}
-
-	q.defaultProxyDisplayName = "Default"
-	q.defaultProxyIconURL = "/emojis/1f3e1.png"
-
-	_, err = q.InsertProvisionerKey(context.Background(), database.InsertProvisionerKeyParams{
-		ID:             codersdk.ProvisionerKeyUUIDBuiltIn,
-		OrganizationID: defaultOrg.ID,
-		CreatedAt:      dbtime.Now(),
-		HashedSecret:   []byte{},
-		Name:           codersdk.ProvisionerKeyNameBuiltIn,
-		Tags:           map[string]string{},
-	})
-	if err != nil {
-		panic(xerrors.Errorf("failed to create built-in provisioner key: %w", err))
-	}
-	_, err = q.InsertProvisionerKey(context.Background(), database.InsertProvisionerKeyParams{
-		ID:             codersdk.ProvisionerKeyUUIDUserAuth,
-		OrganizationID: defaultOrg.ID,
-		CreatedAt:      dbtime.Now(),
-		HashedSecret:   []byte{},
-		Name:           codersdk.ProvisionerKeyNameUserAuth,
-		Tags:           map[string]string{},
-	})
-	if err != nil {
-		panic(xerrors.Errorf("failed to create user-auth provisioner key: %w", err))
-	}
-	_, err = q.InsertProvisionerKey(context.Background(), database.InsertProvisionerKeyParams{
-		ID:             codersdk.ProvisionerKeyUUIDPSK,
-		OrganizationID: defaultOrg.ID,
-		CreatedAt:      dbtime.Now(),
-		HashedSecret:   []byte{},
-		Name:           codersdk.ProvisionerKeyNamePSK,
-		Tags:           map[string]string{},
-	})
-	if err != nil {
-		panic(xerrors.Errorf("failed to create psk provisioner key: %w", err))
-	}
-
-	q.mutex.Lock()
-	// We can't insert this user using the interface, because it's a system user.
-	q.data.users = append(q.data.users, database.User{
-		ID:             database.PrebuildsSystemUserID,
-		Email:          "prebuilds@coder.com",
-		Username:       "prebuilds",
-		CreatedAt:      dbtime.Now(),
-		UpdatedAt:      dbtime.Now(),
-		Status:         "active",
-		LoginType:      "none",
-		HashedPassword: []byte{},
-		IsSystem:       true,
-		Deleted:        false,
-	})
-	q.mutex.Unlock()
-
-	return q
+	panic("dbmem created")
 }
 
 type rwMutex interface {
