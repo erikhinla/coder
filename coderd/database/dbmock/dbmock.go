@@ -2464,10 +2464,10 @@ func (mr *MockStoreMockRecorder) GetPresetsByTemplateVersionID(ctx, templateVers
 }
 
 // GetPreviousTemplateVersion mocks base method.
-func (m *MockStore) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.TemplateVersion, error) {
+func (m *MockStore) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.GetPreviousTemplateVersionRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetPreviousTemplateVersion", ctx, arg)
-	ret0, _ := ret[0].(database.TemplateVersion)
+	ret0, _ := ret[0].(database.GetPreviousTemplateVersionRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3124,10 +3124,10 @@ func (mr *MockStoreMockRecorder) GetTemplateUserRoles(ctx, id any) *gomock.Call 
 }
 
 // GetTemplateVersionByID mocks base method.
-func (m *MockStore) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (database.GetTemplateVersionByIDRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionByID", ctx, id)
-	ret0, _ := ret[0].(database.TemplateVersion)
+	ret0, _ := ret[0].(database.GetTemplateVersionByIDRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3139,10 +3139,10 @@ func (mr *MockStoreMockRecorder) GetTemplateVersionByID(ctx, id any) *gomock.Cal
 }
 
 // GetTemplateVersionByJobID mocks base method.
-func (m *MockStore) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.GetTemplateVersionByJobIDRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionByJobID", ctx, jobID)
-	ret0, _ := ret[0].(database.TemplateVersion)
+	ret0, _ := ret[0].(database.GetTemplateVersionByJobIDRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3154,10 +3154,10 @@ func (mr *MockStoreMockRecorder) GetTemplateVersionByJobID(ctx, jobID any) *gomo
 }
 
 // GetTemplateVersionByTemplateIDAndName mocks base method.
-func (m *MockStore) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.GetTemplateVersionByTemplateIDAndNameRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionByTemplateIDAndName", ctx, arg)
-	ret0, _ := ret[0].(database.TemplateVersion)
+	ret0, _ := ret[0].(database.GetTemplateVersionByTemplateIDAndNameRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3229,10 +3229,10 @@ func (mr *MockStoreMockRecorder) GetTemplateVersionWorkspaceTags(ctx, templateVe
 }
 
 // GetTemplateVersionsByIDs mocks base method.
-func (m *MockStore) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.GetTemplateVersionsByIDsRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionsByIDs", ctx, ids)
-	ret0, _ := ret[0].([]database.TemplateVersion)
+	ret0, _ := ret[0].([]database.GetTemplateVersionsByIDsRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3244,10 +3244,10 @@ func (mr *MockStoreMockRecorder) GetTemplateVersionsByIDs(ctx, ids any) *gomock.
 }
 
 // GetTemplateVersionsByTemplateID mocks base method.
-func (m *MockStore) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.GetTemplateVersionsByTemplateIDRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionsByTemplateID", ctx, arg)
-	ret0, _ := ret[0].([]database.TemplateVersion)
+	ret0, _ := ret[0].([]database.GetTemplateVersionsByTemplateIDRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
@@ -3259,10 +3259,10 @@ func (mr *MockStoreMockRecorder) GetTemplateVersionsByTemplateID(ctx, arg any) *
 }
 
 // GetTemplateVersionsCreatedAfter mocks base method.
-func (m *MockStore) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.TemplateVersion, error) {
+func (m *MockStore) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.GetTemplateVersionsCreatedAfterRow, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "GetTemplateVersionsCreatedAfter", ctx, createdAt)
-	ret0, _ := ret[0].([]database.TemplateVersion)
+	ret0, _ := ret[0].([]database.GetTemplateVersionsCreatedAfterRow)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }

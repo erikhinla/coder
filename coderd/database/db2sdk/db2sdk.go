@@ -751,6 +751,7 @@ func CryptoKey(key database.CryptoKey) codersdk.CryptoKey {
 	}
 }
 
+/*
 func MatchedProvisioners(provisionerDaemons []database.ProvisionerDaemon, now time.Time, staleInterval time.Duration) codersdk.MatchedProvisioners {
 	minLastSeenAt := now.Add(-staleInterval)
 	mostRecentlySeen := codersdk.NullTime{}
@@ -770,6 +771,7 @@ func MatchedProvisioners(provisionerDaemons []database.ProvisionerDaemon, now ti
 	}
 	return matched
 }
+*/
 
 func TemplateRoleActions(role codersdk.TemplateRole) []policy.Action {
 	switch role {

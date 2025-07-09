@@ -1188,7 +1188,7 @@ func (m queryMetricsStore) GetPresetsByTemplateVersionID(ctx context.Context, te
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.TemplateVersion, error) {
+func (m queryMetricsStore) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.GetPreviousTemplateVersionRow, error) {
 	start := time.Now()
 	version, err := m.s.GetPreviousTemplateVersion(ctx, arg)
 	m.queryLatencies.WithLabelValues("GetPreviousTemplateVersion").Observe(time.Since(start).Seconds())
@@ -1482,21 +1482,21 @@ func (m queryMetricsStore) GetTemplateUsageStats(ctx context.Context, arg databa
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (database.GetTemplateVersionByIDRow, error) {
 	start := time.Now()
 	version, err := m.s.GetTemplateVersionByID(ctx, id)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionByID").Observe(time.Since(start).Seconds())
 	return version, err
 }
 
-func (m queryMetricsStore) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.GetTemplateVersionByJobIDRow, error) {
 	start := time.Now()
 	version, err := m.s.GetTemplateVersionByJobID(ctx, jobID)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionByJobID").Observe(time.Since(start).Seconds())
 	return version, err
 }
 
-func (m queryMetricsStore) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.GetTemplateVersionByTemplateIDAndNameRow, error) {
 	start := time.Now()
 	version, err := m.s.GetTemplateVersionByTemplateIDAndName(ctx, arg)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionByTemplateIDAndName").Observe(time.Since(start).Seconds())
@@ -1531,21 +1531,21 @@ func (m queryMetricsStore) GetTemplateVersionWorkspaceTags(ctx context.Context, 
 	return r0, r1
 }
 
-func (m queryMetricsStore) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.GetTemplateVersionsByIDsRow, error) {
 	start := time.Now()
 	versions, err := m.s.GetTemplateVersionsByIDs(ctx, ids)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionsByIDs").Observe(time.Since(start).Seconds())
 	return versions, err
 }
 
-func (m queryMetricsStore) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.GetTemplateVersionsByTemplateIDRow, error) {
 	start := time.Now()
 	versions, err := m.s.GetTemplateVersionsByTemplateID(ctx, arg)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionsByTemplateID").Observe(time.Since(start).Seconds())
 	return versions, err
 }
 
-func (m queryMetricsStore) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.TemplateVersion, error) {
+func (m queryMetricsStore) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.GetTemplateVersionsCreatedAfterRow, error) {
 	start := time.Now()
 	versions, err := m.s.GetTemplateVersionsCreatedAfter(ctx, createdAt)
 	m.queryLatencies.WithLabelValues("GetTemplateVersionsCreatedAfter").Observe(time.Since(start).Seconds())

@@ -1041,14 +1041,14 @@ func authorizedTemplateVersionFromJob(ctx context.Context, q *querier, job datab
 		if err != nil {
 			return database.TemplateVersion{}, err
 		}
-		return tv, nil
+		return tv.TemplateVersion, nil
 	case database.ProvisionerJobTypeTemplateVersionImport:
 		// Authorized call to get template version.
 		tv, err := q.GetTemplateVersionByJobID(ctx, job.ID)
 		if err != nil {
 			return database.TemplateVersion{}, err
 		}
-		return tv, nil
+		return tv.TemplateVersion, nil
 	default:
 		return database.TemplateVersion{}, xerrors.Errorf("unknown job type: %q", job.Type)
 	}
@@ -2333,13 +2333,13 @@ func (q *querier) GetParameterSchemasByJobID(ctx context.Context, jobID uuid.UUI
 	if err != nil {
 		return nil, err
 	}
-	object := version.RBACObjectNoTemplate()
-	if version.TemplateID.Valid {
-		tpl, err := q.db.GetTemplateByID(ctx, version.TemplateID.UUID)
+	object := version.TemplateVersion.RBACObjectNoTemplate()
+	if version.TemplateVersion.TemplateID.Valid {
+		tpl, err := q.db.GetTemplateByID(ctx, version.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return nil, err
 		}
-		object = version.RBACObject(tpl)
+		object = version.TemplateVersion.RBACObject(tpl)
 	}
 
 	err = q.authorizeContext(ctx, policy.ActionRead, object)
@@ -2431,16 +2431,16 @@ func (q *querier) GetPresetsByTemplateVersionID(ctx context.Context, templateVer
 	return q.db.GetPresetsByTemplateVersionID(ctx, templateVersionID)
 }
 
-func (q *querier) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.TemplateVersion, error) {
+func (q *querier) GetPreviousTemplateVersion(ctx context.Context, arg database.GetPreviousTemplateVersionParams) (database.GetPreviousTemplateVersionRow, error) {
 	// An actor can read the previous template version if they can read the related template.
 	// If no linked template exists, we check if the actor can read *a* template.
 	if !arg.TemplateID.Valid {
 		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(arg.OrganizationID)); err != nil {
-			return database.TemplateVersion{}, err
+			return database.GetPreviousTemplateVersionRow{}, err
 		}
 	}
 	if _, err := q.GetTemplateByID(ctx, arg.TemplateID.UUID); err != nil {
-		return database.TemplateVersion{}, err
+		return database.GetPreviousTemplateVersionRow{}, err
 	}
 	return q.db.GetPreviousTemplateVersion(ctx, arg)
 }
@@ -2744,53 +2744,53 @@ func (q *querier) GetTemplateUsageStats(ctx context.Context, arg database.GetTem
 	return q.db.GetTemplateUsageStats(ctx, arg)
 }
 
-func (q *querier) GetTemplateVersionByID(ctx context.Context, tvid uuid.UUID) (database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionByID(ctx context.Context, tvid uuid.UUID) (database.GetTemplateVersionByIDRow, error) {
 	tv, err := q.db.GetTemplateVersionByID(ctx, tvid)
 	if err != nil {
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByIDRow{}, err
 	}
-	if !tv.TemplateID.Valid {
+	if !tv.TemplateVersion.TemplateID.Valid {
 		// If no linked template exists, check if the actor can read a template in the organization.
-		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.OrganizationID)); err != nil {
-			return database.TemplateVersion{}, err
+		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)); err != nil {
+			return database.GetTemplateVersionByIDRow{}, err
 		}
-	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateID.UUID); err != nil {
+	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID); err != nil {
 		// An actor can read the template version if they can read the related template.
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByIDRow{}, err
 	}
 	return tv, nil
 }
 
-func (q *querier) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (database.GetTemplateVersionByJobIDRow, error) {
 	tv, err := q.db.GetTemplateVersionByJobID(ctx, jobID)
 	if err != nil {
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByJobIDRow{}, err
 	}
-	if !tv.TemplateID.Valid {
+	if !tv.TemplateVersion.TemplateID.Valid {
 		// If no linked template exists, check if the actor can read a template in the organization.
-		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.OrganizationID)); err != nil {
-			return database.TemplateVersion{}, err
+		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)); err != nil {
+			return database.GetTemplateVersionByJobIDRow{}, err
 		}
-	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateID.UUID); err != nil {
+	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID); err != nil {
 		// An actor can read the template version if they can read the related template.
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByJobIDRow{}, err
 	}
 	return tv, nil
 }
 
-func (q *querier) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg database.GetTemplateVersionByTemplateIDAndNameParams) (database.GetTemplateVersionByTemplateIDAndNameRow, error) {
 	tv, err := q.db.GetTemplateVersionByTemplateIDAndName(ctx, arg)
 	if err != nil {
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByTemplateIDAndNameRow{}, err
 	}
-	if !tv.TemplateID.Valid {
+	if !tv.TemplateVersion.TemplateID.Valid {
 		// If no linked template exists, check if the actor can read a template in the organization.
-		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.OrganizationID)); err != nil {
-			return database.TemplateVersion{}, err
+		if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)); err != nil {
+			return database.GetTemplateVersionByTemplateIDAndNameRow{}, err
 		}
-	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateID.UUID); err != nil {
+	} else if _, err := q.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID); err != nil {
 		// An actor can read the template version if they can read the related template.
-		return database.TemplateVersion{}, err
+		return database.GetTemplateVersionByTemplateIDAndNameRow{}, err
 	}
 	return tv, nil
 }
@@ -2803,14 +2803,14 @@ func (q *querier) GetTemplateVersionParameters(ctx context.Context, templateVers
 	}
 
 	var object rbac.Objecter
-	template, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+	template, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		object = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+		object = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		object = tv.RBACObject(template)
+		object = tv.TemplateVersion.RBACObject(template)
 	}
 
 	if err := q.authorizeContext(ctx, policy.ActionRead, object); err != nil {
@@ -2838,14 +2838,14 @@ func (q *querier) GetTemplateVersionVariables(ctx context.Context, templateVersi
 	}
 
 	var object rbac.Objecter
-	template, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+	template, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		object = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+		object = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		object = tv.RBACObject(template)
+		object = tv.TemplateVersion.RBACObject(template)
 	}
 
 	if err := q.authorizeContext(ctx, policy.ActionRead, object); err != nil {
@@ -2861,14 +2861,14 @@ func (q *querier) GetTemplateVersionWorkspaceTags(ctx context.Context, templateV
 	}
 
 	var object rbac.Objecter
-	template, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+	template, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			return nil, err
 		}
-		object = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+		object = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		object = tv.RBACObject(template)
+		object = tv.TemplateVersion.RBACObject(template)
 	}
 
 	if err := q.authorizeContext(ctx, policy.ActionRead, object); err != nil {
@@ -2879,14 +2879,14 @@ func (q *querier) GetTemplateVersionWorkspaceTags(ctx context.Context, templateV
 
 // GetTemplateVersionsByIDs is only used for workspace build data.
 // The workspace is already fetched.
-func (q *querier) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]database.GetTemplateVersionsByIDsRow, error) {
 	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceSystem); err != nil {
 		return nil, err
 	}
 	return q.db.GetTemplateVersionsByIDs(ctx, ids)
 }
 
-func (q *querier) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionsByTemplateID(ctx context.Context, arg database.GetTemplateVersionsByTemplateIDParams) ([]database.GetTemplateVersionsByTemplateIDRow, error) {
 	// An actor can read template versions if they can read the related template.
 	template, err := q.db.GetTemplateByID(ctx, arg.TemplateID)
 	if err != nil {
@@ -2900,7 +2900,7 @@ func (q *querier) GetTemplateVersionsByTemplateID(ctx context.Context, arg datab
 	return q.db.GetTemplateVersionsByTemplateID(ctx, arg)
 }
 
-func (q *querier) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.TemplateVersion, error) {
+func (q *querier) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]database.GetTemplateVersionsCreatedAfterRow, error) {
 	// An actor can read execute this query if they can read all templates.
 	if err := q.authorizeContext(ctx, policy.ActionRead, rbac.ResourceTemplate.All()); err != nil {
 		return nil, err
@@ -4212,7 +4212,7 @@ func (q *querier) UnarchiveTemplateVersion(ctx context.Context, arg database.Una
 		return err
 	}
 
-	tpl, err := q.db.GetTemplateByID(ctx, v.TemplateID.UUID)
+	tpl, err := q.db.GetTemplateByID(ctx, v.TemplateVersion.TemplateID.UUID)
 	if err != nil {
 		return err
 	}
@@ -4578,10 +4578,10 @@ func (q *querier) UpdateTemplateVersionAITaskByJobID(ctx context.Context, arg da
 		return err
 	}
 	var obj rbac.Objecter
-	if !tv.TemplateID.Valid {
-		obj = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+	if !tv.TemplateVersion.TemplateID.Valid {
+		obj = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return err
 		}
@@ -4600,10 +4600,10 @@ func (q *querier) UpdateTemplateVersionByID(ctx context.Context, arg database.Up
 		return err
 	}
 	var obj rbac.Objecter
-	if !tv.TemplateID.Valid {
-		obj = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+	if !tv.TemplateVersion.TemplateID.Valid {
+		obj = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return err
 		}
@@ -4622,10 +4622,10 @@ func (q *querier) UpdateTemplateVersionDescriptionByJobID(ctx context.Context, a
 		return err
 	}
 	var obj rbac.Objecter
-	if !tv.TemplateID.Valid {
-		obj = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+	if !tv.TemplateVersion.TemplateID.Valid {
+		obj = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return err
 		}
@@ -4644,10 +4644,10 @@ func (q *querier) UpdateTemplateVersionExternalAuthProvidersByJobID(ctx context.
 		return err
 	}
 	var obj rbac.Objecter
-	if !tv.TemplateID.Valid {
-		obj = rbac.ResourceTemplate.InOrg(tv.OrganizationID)
+	if !tv.TemplateVersion.TemplateID.Valid {
+		obj = rbac.ResourceTemplate.InOrg(tv.TemplateVersion.OrganizationID)
 	} else {
-		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateID.UUID)
+		tpl, err := q.db.GetTemplateByID(ctx, tv.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return err
 		}

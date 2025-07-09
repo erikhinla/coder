@@ -977,7 +977,7 @@ func ExternalAuthLink(t testing.TB, db database.Store, orig database.ExternalAut
 }
 
 func TemplateVersion(t testing.TB, db database.Store, orig database.TemplateVersion) database.TemplateVersion {
-	var version database.TemplateVersion
+	var version database.GetTemplateVersionByIDRow
 	hasAITask := takeFirst(orig.HasAITask, sql.NullBool{})
 	jobID := takeFirst(orig.JobID, uuid.New())
 	err := db.InTx(func(db database.Store) error {
@@ -1015,7 +1015,7 @@ func TemplateVersion(t testing.TB, db database.Store, orig database.TemplateVers
 	}, nil)
 	require.NoError(t, err, "insert template version")
 
-	return version
+	return version.TemplateVersion
 }
 
 func TemplateVersionVariable(t testing.TB, db database.Store, orig database.TemplateVersionVariable) database.TemplateVersionVariable {
@@ -1077,7 +1077,7 @@ func TemplateVersionTerraformValues(t testing.TB, db database.Store, orig databa
 	if orig.TemplateVersionID != uuid.Nil {
 		v, err := db.GetTemplateVersionByID(genCtx, orig.TemplateVersionID)
 		if err == nil {
-			jobID = v.JobID
+			jobID = v.TemplateVersion.JobID
 		}
 	}
 

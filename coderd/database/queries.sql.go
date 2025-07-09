@@ -8228,68 +8228,102 @@ func (q *sqlQuerier) GetProvisionerJobsByIDs(ctx context.Context, ids []uuid.UUI
 }
 
 const getProvisionerJobsByIDsWithQueuePosition = `-- name: GetProvisionerJobsByIDsWithQueuePosition :many
-WITH filtered_provisioner_jobs AS (
+WITH
+filtered_provisioner_jobs AS (
 	-- Step 1: Filter provisioner_jobs
-	SELECT
-		id, created_at
-	FROM
-		provisioner_jobs
-	WHERE
-		id = ANY($1 :: uuid [ ]) -- Apply filter early to reduce dataset size before expensive JOIN
+	SELECT id, created_at, tags
+	FROM provisioner_jobs
+	WHERE id = ANY($1:: uuid [])
 ),
 pending_jobs AS (
 	-- Step 2: Extract only pending jobs
-	SELECT
-		id, created_at, tags
-	FROM
-		provisioner_jobs
-	WHERE
-		job_status = 'pending'
+	SELECT id, created_at, tags
+	FROM provisioner_jobs
+	WHERE job_status = 'pending'
 ),
 online_provisioner_daemons AS (
-	SELECT id, tags FROM provisioner_daemons pd
+	-- Step 3: Filter out stale provisioner daemons before joining.
+	SELECT id, last_seen_at, tags FROM provisioner_daemons pd
 	WHERE pd.last_seen_at IS NOT NULL AND pd.last_seen_at >= (NOW() - ($2::bigint || ' ms')::interval)
 ),
+matching_provisioner_daemons AS (
+	-- Step 4: Count available provisioners for the relevant filtered tagsets.
+	SELECT
+		opd.id,
+		opd.tags,
+		opd.last_seen_at
+	FROM filtered_provisioner_jobs fpj
+	INNER JOIN online_provisioner_daemons opd ON provisioner_tagset_contains(opd.tags, fpj.tags)
+),
+busy_provisioner_daemons AS (
+	-- Step 5: Count busy provisioners for the relevant filtered tagsets.
+	SELECT mpd.id, mpd.tags
+	FROM matching_provisioner_daemons mpd
+	INNER JOIN provisioner_jobs pj ON pj.worker_id = mpd.id
+	WHERE pj.job_status = 'running'::provisioner_job_status
+	GROUP BY mpd.id, mpd.tags
+),
+available_provisioner_daemons AS (
+	-- Step 6: Aggregate available provisioners for the relevant filtered tagsets.
+	SELECT
+	  tags,
+		ARRAY_AGG(id) AS ids,
+		MAX(last_seen_at) AS last_seen_at
+	FROM matching_provisioner_daemons
+	WHERE id NOT IN (SELECT id FROM busy_provisioner_daemons)
+	GROUP BY tags
+),
+matching_provisioner_count AS (
+	-- Step 7: Count matching provisioners for the relevant filtered tagsets.
+	SELECT
+		tags,
+		ARRAY_AGG(id) AS ids
+	FROM matching_provisioner_daemons
+	GROUP BY tags
+),
 ranked_jobs AS (
-	-- Step 3: Rank only pending jobs based on provisioner availability
+	-- Step 8: Rank only pending jobs based on provisioner availability
 	SELECT
 		pj.id,
 		pj.created_at,
-		ROW_NUMBER() OVER (PARTITION BY opd.id ORDER BY pj.created_at ASC) AS queue_position,
-		COUNT(*) OVER (PARTITION BY opd.id) AS queue_size
-	FROM
-		pending_jobs pj
-			INNER JOIN online_provisioner_daemons opd
-					ON provisioner_tagset_contains(opd.tags, pj.tags) -- Join only on the small pending set
+		ROW_NUMBER() OVER (PARTITION BY mpd.id ORDER BY pj.created_at ASC) AS queue_position,
+		COUNT(*) OVER (PARTITION BY mpd.id) AS queue_size
+	FROM pending_jobs pj
+	-- Join only on the small pending set
+	INNER JOIN matching_provisioner_daemons mpd ON provisioner_tagset_contains(mpd.tags, pj.tags)
 ),
 final_jobs AS (
-	-- Step 4: Compute best queue position and max queue size per job
+	-- Step 9: Compute best queue position and max queue size per job
 	SELECT
 		fpj.id,
 		fpj.created_at,
-		COALESCE(MIN(rj.queue_position), 0) :: BIGINT AS queue_position, -- Best queue position across provisioners
-		COALESCE(MAX(rj.queue_size), 0) :: BIGINT AS queue_size -- Max queue size across provisioners
-	FROM
-		filtered_provisioner_jobs fpj -- Use the pre-filtered dataset instead of full provisioner_jobs
-			LEFT JOIN ranked_jobs rj
-					ON fpj.id = rj.id -- Join with the ranking jobs CTE to assign a rank to each specified provisioner job.
-	GROUP BY
-		fpj.id, fpj.created_at
+		-- Best queue position across provisioners
+		COALESCE(MIN(rj.queue_position), 0) :: BIGINT AS queue_position,
+		-- Max queue size across provisioners
+		COALESCE(MAX(rj.queue_size), 0) :: BIGINT AS queue_size
+	-- Use the pre-filtered dataset instead of full provisioner_jobs
+	FROM filtered_provisioner_jobs fpj
+	-- Join with the ranking jobs CTE to assign a rank to each specified provisioner job.
+	LEFT JOIN ranked_jobs rj ON fpj.id = rj.id
+	GROUP BY fpj.id, fpj.created_at
 )
 SELECT
-	-- Step 5: Final SELECT with INNER JOIN provisioner_jobs
+	-- Step 10: Final SELECT with INNER JOIN provisioner_jobs
 	fj.id,
 	fj.created_at,
 	pj.id, pj.created_at, pj.updated_at, pj.started_at, pj.canceled_at, pj.completed_at, pj.error, pj.organization_id, pj.initiator_id, pj.provisioner, pj.storage_method, pj.type, pj.input, pj.worker_id, pj.file_id, pj.tags, pj.error_code, pj.trace_metadata, pj.job_status,
 	fj.queue_position,
-	fj.queue_size
-FROM
-	final_jobs fj
-		INNER JOIN provisioner_jobs pj
-				ON fj.id = pj.id -- Ensure we retrieve full details from ` + "`" + `provisioner_jobs` + "`" + `.
-                                 -- JOIN with pj is required for sqlc.embed(pj) to compile successfully.
-ORDER BY
-	fj.created_at
+	fj.queue_size,
+	mpc.ids::uuid[] AS provisioners_matched,
+	apd.ids::uuid[] AS provisioners_available,
+	apd.last_seen_at::timestamptz AS provisioners_matched_last_seen_at
+FROM final_jobs fj
+	-- Ensure we retrieve full details from ` + "`" + `provisioner_jobs` + "`" + `.
+	-- JOIN with pj is required for sqlc.embed(pj) to compile successfully.
+INNER JOIN provisioner_jobs pj ON fj.id = pj.id
+LEFT JOIN matching_provisioner_count mpc ON provisioner_tagset_contains(mpc.tags, pj.tags)
+LEFT JOIN available_provisioner_daemons apd ON provisioner_tagset_contains(apd.tags, pj.tags)
+ORDER BY fj.created_at
 `
 
 type GetProvisionerJobsByIDsWithQueuePositionParams struct {
@@ -8298,11 +8332,14 @@ type GetProvisionerJobsByIDsWithQueuePositionParams struct {
 }
 
 type GetProvisionerJobsByIDsWithQueuePositionRow struct {
-	ID             uuid.UUID      `db:"id" json:"id"`
-	CreatedAt      time.Time      `db:"created_at" json:"created_at"`
-	ProvisionerJob ProvisionerJob `db:"provisioner_job" json:"provisioner_job"`
-	QueuePosition  int64          `db:"queue_position" json:"queue_position"`
-	QueueSize      int64          `db:"queue_size" json:"queue_size"`
+	ID                            uuid.UUID      `db:"id" json:"id"`
+	CreatedAt                     time.Time      `db:"created_at" json:"created_at"`
+	ProvisionerJob                ProvisionerJob `db:"provisioner_job" json:"provisioner_job"`
+	QueuePosition                 int64          `db:"queue_position" json:"queue_position"`
+	QueueSize                     int64          `db:"queue_size" json:"queue_size"`
+	ProvisionersMatched           []uuid.UUID    `db:"provisioners_matched" json:"provisioners_matched"`
+	ProvisionersAvailable         []uuid.UUID    `db:"provisioners_available" json:"provisioners_available"`
+	ProvisionersMatchedLastSeenAt time.Time      `db:"provisioners_matched_last_seen_at" json:"provisioners_matched_last_seen_at"`
 }
 
 func (q *sqlQuerier) GetProvisionerJobsByIDsWithQueuePosition(ctx context.Context, arg GetProvisionerJobsByIDsWithQueuePositionParams) ([]GetProvisionerJobsByIDsWithQueuePositionRow, error) {
@@ -8338,6 +8375,9 @@ func (q *sqlQuerier) GetProvisionerJobsByIDsWithQueuePosition(ctx context.Contex
 			&i.ProvisionerJob.JobStatus,
 			&i.QueuePosition,
 			&i.QueueSize,
+			pq.Array(&i.ProvisionersMatched),
+			pq.Array(&i.ProvisionersAvailable),
+			&i.ProvisionersMatchedLastSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -12068,18 +12108,21 @@ func (q *sqlQuerier) ArchiveUnusedTemplateVersions(ctx context.Context, arg Arch
 
 const getPreviousTemplateVersion = `-- name: GetPreviousTemplateVersion :one
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	pj.id, pj.created_at, pj.updated_at, pj.started_at, pj.canceled_at, pj.completed_at, pj.error, pj.organization_id, pj.initiator_id, pj.provisioner, pj.storage_method, pj.type, pj.input, pj.worker_id, pj.file_id, pj.tags, pj.error_code, pj.trace_metadata, pj.job_status
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
-	created_at < (
-		SELECT created_at
+	template_version_with_user.created_at < (
+		SELECT tv.created_at
 		FROM template_version_with_user AS tv
 		WHERE tv.organization_id = $1 AND tv.name = $2 AND tv.template_id = $3
 	)
-	AND organization_id = $1
-	AND template_id = $3
-ORDER BY created_at DESC
+	AND template_version_with_user.organization_id = $1
+	AND template_version_with_user.template_id = $3
+ORDER BY template_version_with_user.created_at DESC
 LIMIT 1
 `
 
@@ -12089,107 +12132,188 @@ type GetPreviousTemplateVersionParams struct {
 	TemplateID     uuid.NullUUID `db:"template_id" json:"template_id"`
 }
 
-func (q *sqlQuerier) GetPreviousTemplateVersion(ctx context.Context, arg GetPreviousTemplateVersionParams) (TemplateVersion, error) {
+type GetPreviousTemplateVersionRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetPreviousTemplateVersion(ctx context.Context, arg GetPreviousTemplateVersionParams) (GetPreviousTemplateVersionRow, error) {
 	row := q.db.QueryRowContext(ctx, getPreviousTemplateVersion, arg.OrganizationID, arg.Name, arg.TemplateID)
-	var i TemplateVersion
+	var i GetPreviousTemplateVersionRow
 	err := row.Scan(
-		&i.ID,
-		&i.TemplateID,
-		&i.OrganizationID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Name,
-		&i.Readme,
-		&i.JobID,
-		&i.CreatedBy,
-		&i.ExternalAuthProviders,
-		&i.Message,
-		&i.Archived,
-		&i.SourceExampleID,
-		&i.HasAITask,
-		&i.CreatedByAvatarURL,
-		&i.CreatedByUsername,
-		&i.CreatedByName,
+		&i.TemplateVersion.ID,
+		&i.TemplateVersion.TemplateID,
+		&i.TemplateVersion.OrganizationID,
+		&i.TemplateVersion.CreatedAt,
+		&i.TemplateVersion.UpdatedAt,
+		&i.TemplateVersion.Name,
+		&i.TemplateVersion.Readme,
+		&i.TemplateVersion.JobID,
+		&i.TemplateVersion.CreatedBy,
+		&i.TemplateVersion.ExternalAuthProviders,
+		&i.TemplateVersion.Message,
+		&i.TemplateVersion.Archived,
+		&i.TemplateVersion.SourceExampleID,
+		&i.TemplateVersion.HasAITask,
+		&i.TemplateVersion.CreatedByAvatarURL,
+		&i.TemplateVersion.CreatedByUsername,
+		&i.TemplateVersion.CreatedByName,
+		&i.ProvisionerJob.ID,
+		&i.ProvisionerJob.CreatedAt,
+		&i.ProvisionerJob.UpdatedAt,
+		&i.ProvisionerJob.StartedAt,
+		&i.ProvisionerJob.CanceledAt,
+		&i.ProvisionerJob.CompletedAt,
+		&i.ProvisionerJob.Error,
+		&i.ProvisionerJob.OrganizationID,
+		&i.ProvisionerJob.InitiatorID,
+		&i.ProvisionerJob.Provisioner,
+		&i.ProvisionerJob.StorageMethod,
+		&i.ProvisionerJob.Type,
+		&i.ProvisionerJob.Input,
+		&i.ProvisionerJob.WorkerID,
+		&i.ProvisionerJob.FileID,
+		&i.ProvisionerJob.Tags,
+		&i.ProvisionerJob.ErrorCode,
+		&i.ProvisionerJob.TraceMetadata,
+		&i.ProvisionerJob.JobStatus,
 	)
 	return i, err
 }
 
 const getTemplateVersionByID = `-- name: GetTemplateVersionByID :one
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	pj.id, pj.created_at, pj.updated_at, pj.started_at, pj.canceled_at, pj.completed_at, pj.error, pj.organization_id, pj.initiator_id, pj.provisioner, pj.storage_method, pj.type, pj.input, pj.worker_id, pj.file_id, pj.tags, pj.error_code, pj.trace_metadata, pj.job_status
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_versions.job_id = pj.id
 WHERE
-	id = $1
+	template_version_with_user.id = $1
 `
 
-func (q *sqlQuerier) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (TemplateVersion, error) {
+type GetTemplateVersionByIDRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionByID(ctx context.Context, id uuid.UUID) (GetTemplateVersionByIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getTemplateVersionByID, id)
-	var i TemplateVersion
+	var i GetTemplateVersionByIDRow
 	err := row.Scan(
-		&i.ID,
-		&i.TemplateID,
-		&i.OrganizationID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Name,
-		&i.Readme,
-		&i.JobID,
-		&i.CreatedBy,
-		&i.ExternalAuthProviders,
-		&i.Message,
-		&i.Archived,
-		&i.SourceExampleID,
-		&i.HasAITask,
-		&i.CreatedByAvatarURL,
-		&i.CreatedByUsername,
-		&i.CreatedByName,
+		&i.TemplateVersion.ID,
+		&i.TemplateVersion.TemplateID,
+		&i.TemplateVersion.OrganizationID,
+		&i.TemplateVersion.CreatedAt,
+		&i.TemplateVersion.UpdatedAt,
+		&i.TemplateVersion.Name,
+		&i.TemplateVersion.Readme,
+		&i.TemplateVersion.JobID,
+		&i.TemplateVersion.CreatedBy,
+		&i.TemplateVersion.ExternalAuthProviders,
+		&i.TemplateVersion.Message,
+		&i.TemplateVersion.Archived,
+		&i.TemplateVersion.SourceExampleID,
+		&i.TemplateVersion.HasAITask,
+		&i.TemplateVersion.CreatedByAvatarURL,
+		&i.TemplateVersion.CreatedByUsername,
+		&i.TemplateVersion.CreatedByName,
+		&i.ProvisionerJob.ID,
+		&i.ProvisionerJob.CreatedAt,
+		&i.ProvisionerJob.UpdatedAt,
+		&i.ProvisionerJob.StartedAt,
+		&i.ProvisionerJob.CanceledAt,
+		&i.ProvisionerJob.CompletedAt,
+		&i.ProvisionerJob.Error,
+		&i.ProvisionerJob.OrganizationID,
+		&i.ProvisionerJob.InitiatorID,
+		&i.ProvisionerJob.Provisioner,
+		&i.ProvisionerJob.StorageMethod,
+		&i.ProvisionerJob.Type,
+		&i.ProvisionerJob.Input,
+		&i.ProvisionerJob.WorkerID,
+		&i.ProvisionerJob.FileID,
+		&i.ProvisionerJob.Tags,
+		&i.ProvisionerJob.ErrorCode,
+		&i.ProvisionerJob.TraceMetadata,
+		&i.ProvisionerJob.JobStatus,
 	)
 	return i, err
 }
 
 const getTemplateVersionByJobID = `-- name: GetTemplateVersionByJobID :one
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	provisioner_jobs.id, provisioner_jobs.created_at, provisioner_jobs.updated_at, provisioner_jobs.started_at, provisioner_jobs.canceled_at, provisioner_jobs.completed_at, provisioner_jobs.error, provisioner_jobs.organization_id, provisioner_jobs.initiator_id, provisioner_jobs.provisioner, provisioner_jobs.storage_method, provisioner_jobs.type, provisioner_jobs.input, provisioner_jobs.worker_id, provisioner_jobs.file_id, provisioner_jobs.tags, provisioner_jobs.error_code, provisioner_jobs.trace_metadata, provisioner_jobs.job_status
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
-	job_id = $1
+	template_version_with_user.job_id = $1
 `
 
-func (q *sqlQuerier) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (TemplateVersion, error) {
+type GetTemplateVersionByJobIDRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionByJobID(ctx context.Context, jobID uuid.UUID) (GetTemplateVersionByJobIDRow, error) {
 	row := q.db.QueryRowContext(ctx, getTemplateVersionByJobID, jobID)
-	var i TemplateVersion
+	var i GetTemplateVersionByJobIDRow
 	err := row.Scan(
-		&i.ID,
-		&i.TemplateID,
-		&i.OrganizationID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Name,
-		&i.Readme,
-		&i.JobID,
-		&i.CreatedBy,
-		&i.ExternalAuthProviders,
-		&i.Message,
-		&i.Archived,
-		&i.SourceExampleID,
-		&i.HasAITask,
-		&i.CreatedByAvatarURL,
-		&i.CreatedByUsername,
-		&i.CreatedByName,
+		&i.TemplateVersion.ID,
+		&i.TemplateVersion.TemplateID,
+		&i.TemplateVersion.OrganizationID,
+		&i.TemplateVersion.CreatedAt,
+		&i.TemplateVersion.UpdatedAt,
+		&i.TemplateVersion.Name,
+		&i.TemplateVersion.Readme,
+		&i.TemplateVersion.JobID,
+		&i.TemplateVersion.CreatedBy,
+		&i.TemplateVersion.ExternalAuthProviders,
+		&i.TemplateVersion.Message,
+		&i.TemplateVersion.Archived,
+		&i.TemplateVersion.SourceExampleID,
+		&i.TemplateVersion.HasAITask,
+		&i.TemplateVersion.CreatedByAvatarURL,
+		&i.TemplateVersion.CreatedByUsername,
+		&i.TemplateVersion.CreatedByName,
+		&i.ProvisionerJob.ID,
+		&i.ProvisionerJob.CreatedAt,
+		&i.ProvisionerJob.UpdatedAt,
+		&i.ProvisionerJob.StartedAt,
+		&i.ProvisionerJob.CanceledAt,
+		&i.ProvisionerJob.CompletedAt,
+		&i.ProvisionerJob.Error,
+		&i.ProvisionerJob.OrganizationID,
+		&i.ProvisionerJob.InitiatorID,
+		&i.ProvisionerJob.Provisioner,
+		&i.ProvisionerJob.StorageMethod,
+		&i.ProvisionerJob.Type,
+		&i.ProvisionerJob.Input,
+		&i.ProvisionerJob.WorkerID,
+		&i.ProvisionerJob.FileID,
+		&i.ProvisionerJob.Tags,
+		&i.ProvisionerJob.ErrorCode,
+		&i.ProvisionerJob.TraceMetadata,
+		&i.ProvisionerJob.JobStatus,
 	)
 	return i, err
 }
 
 const getTemplateVersionByTemplateIDAndName = `-- name: GetTemplateVersionByTemplateIDAndName :one
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job, pj.provisioner_job AS provisioner_job
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
-	template_id = $1
-	AND "name" = $2
+	template_version_with_user.template_id = $1
+	AND template_version_with_user."name" = $2
 `
 
 type GetTemplateVersionByTemplateIDAndNameParams struct {
@@ -12197,67 +12321,118 @@ type GetTemplateVersionByTemplateIDAndNameParams struct {
 	Name       string        `db:"name" json:"name"`
 }
 
-func (q *sqlQuerier) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg GetTemplateVersionByTemplateIDAndNameParams) (TemplateVersion, error) {
+type GetTemplateVersionByTemplateIDAndNameRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionByTemplateIDAndName(ctx context.Context, arg GetTemplateVersionByTemplateIDAndNameParams) (GetTemplateVersionByTemplateIDAndNameRow, error) {
 	row := q.db.QueryRowContext(ctx, getTemplateVersionByTemplateIDAndName, arg.TemplateID, arg.Name)
-	var i TemplateVersion
+	var i GetTemplateVersionByTemplateIDAndNameRow
 	err := row.Scan(
-		&i.ID,
-		&i.TemplateID,
-		&i.OrganizationID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Name,
-		&i.Readme,
-		&i.JobID,
-		&i.CreatedBy,
-		&i.ExternalAuthProviders,
-		&i.Message,
-		&i.Archived,
-		&i.SourceExampleID,
-		&i.HasAITask,
-		&i.CreatedByAvatarURL,
-		&i.CreatedByUsername,
-		&i.CreatedByName,
+		&i.TemplateVersion.ID,
+		&i.TemplateVersion.TemplateID,
+		&i.TemplateVersion.OrganizationID,
+		&i.TemplateVersion.CreatedAt,
+		&i.TemplateVersion.UpdatedAt,
+		&i.TemplateVersion.Name,
+		&i.TemplateVersion.Readme,
+		&i.TemplateVersion.JobID,
+		&i.TemplateVersion.CreatedBy,
+		&i.TemplateVersion.ExternalAuthProviders,
+		&i.TemplateVersion.Message,
+		&i.TemplateVersion.Archived,
+		&i.TemplateVersion.SourceExampleID,
+		&i.TemplateVersion.HasAITask,
+		&i.TemplateVersion.CreatedByAvatarURL,
+		&i.TemplateVersion.CreatedByUsername,
+		&i.TemplateVersion.CreatedByName,
+		&i.ProvisionerJob.ID,
+		&i.ProvisionerJob.CreatedAt,
+		&i.ProvisionerJob.UpdatedAt,
+		&i.ProvisionerJob.StartedAt,
+		&i.ProvisionerJob.CanceledAt,
+		&i.ProvisionerJob.CompletedAt,
+		&i.ProvisionerJob.Error,
+		&i.ProvisionerJob.OrganizationID,
+		&i.ProvisionerJob.InitiatorID,
+		&i.ProvisionerJob.Provisioner,
+		&i.ProvisionerJob.StorageMethod,
+		&i.ProvisionerJob.Type,
+		&i.ProvisionerJob.Input,
+		&i.ProvisionerJob.WorkerID,
+		&i.ProvisionerJob.FileID,
+		&i.ProvisionerJob.Tags,
+		&i.ProvisionerJob.ErrorCode,
+		&i.ProvisionerJob.TraceMetadata,
+		&i.ProvisionerJob.JobStatus,
 	)
 	return i, err
 }
 
 const getTemplateVersionsByIDs = `-- name: GetTemplateVersionsByIDs :many
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	pj.id, pj.created_at, pj.updated_at, pj.started_at, pj.canceled_at, pj.completed_at, pj.error, pj.organization_id, pj.initiator_id, pj.provisioner, pj.storage_method, pj.type, pj.input, pj.worker_id, pj.file_id, pj.tags, pj.error_code, pj.trace_metadata, pj.job_status
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
 	id = ANY($1 :: uuid [ ])
 `
 
-func (q *sqlQuerier) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]TemplateVersion, error) {
+type GetTemplateVersionsByIDsRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UUID) ([]GetTemplateVersionsByIDsRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTemplateVersionsByIDs, pq.Array(ids))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []TemplateVersion
+	var items []GetTemplateVersionsByIDsRow
 	for rows.Next() {
-		var i TemplateVersion
+		var i GetTemplateVersionsByIDsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.TemplateID,
-			&i.OrganizationID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Name,
-			&i.Readme,
-			&i.JobID,
-			&i.CreatedBy,
-			&i.ExternalAuthProviders,
-			&i.Message,
-			&i.Archived,
-			&i.SourceExampleID,
-			&i.HasAITask,
-			&i.CreatedByAvatarURL,
-			&i.CreatedByUsername,
-			&i.CreatedByName,
+			&i.TemplateVersion.ID,
+			&i.TemplateVersion.TemplateID,
+			&i.TemplateVersion.OrganizationID,
+			&i.TemplateVersion.CreatedAt,
+			&i.TemplateVersion.UpdatedAt,
+			&i.TemplateVersion.Name,
+			&i.TemplateVersion.Readme,
+			&i.TemplateVersion.JobID,
+			&i.TemplateVersion.CreatedBy,
+			&i.TemplateVersion.ExternalAuthProviders,
+			&i.TemplateVersion.Message,
+			&i.TemplateVersion.Archived,
+			&i.TemplateVersion.SourceExampleID,
+			&i.TemplateVersion.HasAITask,
+			&i.TemplateVersion.CreatedByAvatarURL,
+			&i.TemplateVersion.CreatedByUsername,
+			&i.TemplateVersion.CreatedByName,
+			&i.ProvisionerJob.ID,
+			&i.ProvisionerJob.CreatedAt,
+			&i.ProvisionerJob.UpdatedAt,
+			&i.ProvisionerJob.StartedAt,
+			&i.ProvisionerJob.CanceledAt,
+			&i.ProvisionerJob.CompletedAt,
+			&i.ProvisionerJob.Error,
+			&i.ProvisionerJob.OrganizationID,
+			&i.ProvisionerJob.InitiatorID,
+			&i.ProvisionerJob.Provisioner,
+			&i.ProvisionerJob.StorageMethod,
+			&i.ProvisionerJob.Type,
+			&i.ProvisionerJob.Input,
+			&i.ProvisionerJob.WorkerID,
+			&i.ProvisionerJob.FileID,
+			&i.ProvisionerJob.Tags,
+			&i.ProvisionerJob.ErrorCode,
+			&i.ProvisionerJob.TraceMetadata,
+			&i.ProvisionerJob.JobStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -12274,9 +12449,12 @@ func (q *sqlQuerier) GetTemplateVersionsByIDs(ctx context.Context, ids []uuid.UU
 
 const getTemplateVersionsByTemplateID = `-- name: GetTemplateVersionsByTemplateID :many
 SELECT
-	id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	provisioner_jobs.id, provisioner_jobs.created_at, provisioner_jobs.updated_at, provisioner_jobs.started_at, provisioner_jobs.canceled_at, provisioner_jobs.completed_at, provisioner_jobs.error, provisioner_jobs.organization_id, provisioner_jobs.initiator_id, provisioner_jobs.provisioner, provisioner_jobs.storage_method, provisioner_jobs.type, provisioner_jobs.input, provisioner_jobs.worker_id, provisioner_jobs.file_id, provisioner_jobs.tags, provisioner_jobs.error_code, provisioner_jobs.trace_metadata, provisioner_jobs.job_status
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
 	template_id = $1 :: uuid
 	  AND CASE
@@ -12322,7 +12500,12 @@ type GetTemplateVersionsByTemplateIDParams struct {
 	LimitOpt   int32        `db:"limit_opt" json:"limit_opt"`
 }
 
-func (q *sqlQuerier) GetTemplateVersionsByTemplateID(ctx context.Context, arg GetTemplateVersionsByTemplateIDParams) ([]TemplateVersion, error) {
+type GetTemplateVersionsByTemplateIDRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionsByTemplateID(ctx context.Context, arg GetTemplateVersionsByTemplateIDParams) ([]GetTemplateVersionsByTemplateIDRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTemplateVersionsByTemplateID,
 		arg.TemplateID,
 		arg.Archived,
@@ -12334,27 +12517,46 @@ func (q *sqlQuerier) GetTemplateVersionsByTemplateID(ctx context.Context, arg Ge
 		return nil, err
 	}
 	defer rows.Close()
-	var items []TemplateVersion
+	var items []GetTemplateVersionsByTemplateIDRow
 	for rows.Next() {
-		var i TemplateVersion
+		var i GetTemplateVersionsByTemplateIDRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.TemplateID,
-			&i.OrganizationID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Name,
-			&i.Readme,
-			&i.JobID,
-			&i.CreatedBy,
-			&i.ExternalAuthProviders,
-			&i.Message,
-			&i.Archived,
-			&i.SourceExampleID,
-			&i.HasAITask,
-			&i.CreatedByAvatarURL,
-			&i.CreatedByUsername,
-			&i.CreatedByName,
+			&i.TemplateVersion.ID,
+			&i.TemplateVersion.TemplateID,
+			&i.TemplateVersion.OrganizationID,
+			&i.TemplateVersion.CreatedAt,
+			&i.TemplateVersion.UpdatedAt,
+			&i.TemplateVersion.Name,
+			&i.TemplateVersion.Readme,
+			&i.TemplateVersion.JobID,
+			&i.TemplateVersion.CreatedBy,
+			&i.TemplateVersion.ExternalAuthProviders,
+			&i.TemplateVersion.Message,
+			&i.TemplateVersion.Archived,
+			&i.TemplateVersion.SourceExampleID,
+			&i.TemplateVersion.HasAITask,
+			&i.TemplateVersion.CreatedByAvatarURL,
+			&i.TemplateVersion.CreatedByUsername,
+			&i.TemplateVersion.CreatedByName,
+			&i.ProvisionerJob.ID,
+			&i.ProvisionerJob.CreatedAt,
+			&i.ProvisionerJob.UpdatedAt,
+			&i.ProvisionerJob.StartedAt,
+			&i.ProvisionerJob.CanceledAt,
+			&i.ProvisionerJob.CompletedAt,
+			&i.ProvisionerJob.Error,
+			&i.ProvisionerJob.OrganizationID,
+			&i.ProvisionerJob.InitiatorID,
+			&i.ProvisionerJob.Provisioner,
+			&i.ProvisionerJob.StorageMethod,
+			&i.ProvisionerJob.Type,
+			&i.ProvisionerJob.Input,
+			&i.ProvisionerJob.WorkerID,
+			&i.ProvisionerJob.FileID,
+			&i.ProvisionerJob.Tags,
+			&i.ProvisionerJob.ErrorCode,
+			&i.ProvisionerJob.TraceMetadata,
+			&i.ProvisionerJob.JobStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -12370,36 +12572,68 @@ func (q *sqlQuerier) GetTemplateVersionsByTemplateID(ctx context.Context, arg Ge
 }
 
 const getTemplateVersionsCreatedAfter = `-- name: GetTemplateVersionsCreatedAfter :many
-SELECT id, template_id, organization_id, created_at, updated_at, name, readme, job_id, created_by, external_auth_providers, message, archived, source_example_id, has_ai_task, created_by_avatar_url, created_by_username, created_by_name FROM template_version_with_user AS template_versions WHERE created_at > $1
+SELECT
+	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
+	provisioner_jobs.id, provisioner_jobs.created_at, provisioner_jobs.updated_at, provisioner_jobs.started_at, provisioner_jobs.canceled_at, provisioner_jobs.completed_at, provisioner_jobs.error, provisioner_jobs.organization_id, provisioner_jobs.initiator_id, provisioner_jobs.provisioner, provisioner_jobs.storage_method, provisioner_jobs.type, provisioner_jobs.input, provisioner_jobs.worker_id, provisioner_jobs.file_id, provisioner_jobs.tags, provisioner_jobs.error_code, provisioner_jobs.trace_metadata, provisioner_jobs.job_status
+FROM
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_job.id
+WHERE
+	template_version_with_user.created_at > $1
 `
 
-func (q *sqlQuerier) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]TemplateVersion, error) {
+type GetTemplateVersionsCreatedAfterRow struct {
+	TemplateVersion TemplateVersion `db:"template_version" json:"template_version"`
+	ProvisionerJob  ProvisionerJob  `db:"provisioner_job" json:"provisioner_job"`
+}
+
+func (q *sqlQuerier) GetTemplateVersionsCreatedAfter(ctx context.Context, createdAt time.Time) ([]GetTemplateVersionsCreatedAfterRow, error) {
 	rows, err := q.db.QueryContext(ctx, getTemplateVersionsCreatedAfter, createdAt)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []TemplateVersion
+	var items []GetTemplateVersionsCreatedAfterRow
 	for rows.Next() {
-		var i TemplateVersion
+		var i GetTemplateVersionsCreatedAfterRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.TemplateID,
-			&i.OrganizationID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Name,
-			&i.Readme,
-			&i.JobID,
-			&i.CreatedBy,
-			&i.ExternalAuthProviders,
-			&i.Message,
-			&i.Archived,
-			&i.SourceExampleID,
-			&i.HasAITask,
-			&i.CreatedByAvatarURL,
-			&i.CreatedByUsername,
-			&i.CreatedByName,
+			&i.TemplateVersion.ID,
+			&i.TemplateVersion.TemplateID,
+			&i.TemplateVersion.OrganizationID,
+			&i.TemplateVersion.CreatedAt,
+			&i.TemplateVersion.UpdatedAt,
+			&i.TemplateVersion.Name,
+			&i.TemplateVersion.Readme,
+			&i.TemplateVersion.JobID,
+			&i.TemplateVersion.CreatedBy,
+			&i.TemplateVersion.ExternalAuthProviders,
+			&i.TemplateVersion.Message,
+			&i.TemplateVersion.Archived,
+			&i.TemplateVersion.SourceExampleID,
+			&i.TemplateVersion.HasAITask,
+			&i.TemplateVersion.CreatedByAvatarURL,
+			&i.TemplateVersion.CreatedByUsername,
+			&i.TemplateVersion.CreatedByName,
+			&i.ProvisionerJob.ID,
+			&i.ProvisionerJob.CreatedAt,
+			&i.ProvisionerJob.UpdatedAt,
+			&i.ProvisionerJob.StartedAt,
+			&i.ProvisionerJob.CanceledAt,
+			&i.ProvisionerJob.CompletedAt,
+			&i.ProvisionerJob.Error,
+			&i.ProvisionerJob.OrganizationID,
+			&i.ProvisionerJob.InitiatorID,
+			&i.ProvisionerJob.Provisioner,
+			&i.ProvisionerJob.StorageMethod,
+			&i.ProvisionerJob.Type,
+			&i.ProvisionerJob.Input,
+			&i.ProvisionerJob.WorkerID,
+			&i.ProvisionerJob.FileID,
+			&i.ProvisionerJob.Tags,
+			&i.ProvisionerJob.ErrorCode,
+			&i.ProvisionerJob.TraceMetadata,
+			&i.ProvisionerJob.JobStatus,
 		); err != nil {
 			return nil, err
 		}
