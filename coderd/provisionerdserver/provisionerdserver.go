@@ -486,11 +486,11 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 		if err != nil {
 			return nil, failJob(fmt.Sprintf("get template version: %s", err))
 		}
-		templateVariables, err := s.Database.GetTemplateVersionVariables(ctx, templateVersion.ID)
+		templateVariables, err := s.Database.GetTemplateVersionVariables(ctx, templateVersion.TemplateVersion.ID)
 		if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
 			return nil, failJob(fmt.Sprintf("get template version variables: %s", err))
 		}
-		template, err := s.Database.GetTemplateByID(ctx, templateVersion.TemplateID.UUID)
+		template, err := s.Database.GetTemplateByID(ctx, templateVersion.TemplateVersion.TemplateID.UUID)
 		if err != nil {
 			return nil, failJob(fmt.Sprintf("get template: %s", err))
 		}
@@ -590,7 +590,7 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 		}
 
 		dbExternalAuthProviders := []database.ExternalAuthProvider{}
-		err = json.Unmarshal(templateVersion.ExternalAuthProviders, &dbExternalAuthProviders)
+		err = json.Unmarshal(templateVersion.TemplateVersion.ExternalAuthProviders, &dbExternalAuthProviders)
 		if err != nil {
 			return nil, xerrors.Errorf("failed to deserialize external_auth_providers value: %w", err)
 		}
@@ -619,7 +619,7 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 			if config == nil {
 				s.Logger.Warn(ctx, "workspace build job is missing external auth provider",
 					slog.F("provider_id", p.ID),
-					slog.F("template_version_id", templateVersion.ID),
+					slog.F("template_version_id", templateVersion.TemplateVersion.ID),
 					slog.F("workspace_id", workspaceBuild.WorkspaceID))
 				continue
 			}
@@ -704,7 +704,7 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 					WorkspaceOwnerId:              owner.ID.String(),
 					TemplateId:                    template.ID.String(),
 					TemplateName:                  template.Name,
-					TemplateVersion:               templateVersion.Name,
+					TemplateVersion:               templateVersion.TemplateVersion.Name,
 					WorkspaceOwnerSessionToken:    sessionToken,
 					WorkspaceOwnerSshPublicKey:    ownerSSHPublicKey,
 					WorkspaceOwnerSshPrivateKey:   ownerSSHPrivateKey,
@@ -728,7 +728,7 @@ func (s *server) acquireProtoJob(ctx context.Context, job database.ProvisionerJo
 		if err != nil {
 			return nil, failJob(fmt.Sprintf("get template version: %s", err))
 		}
-		templateVariables, err := s.Database.GetTemplateVersionVariables(ctx, templateVersion.ID)
+		templateVariables, err := s.Database.GetTemplateVersionVariables(ctx, templateVersion.TemplateVersion.ID)
 		if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
 			return nil, failJob(fmt.Sprintf("get template version variables: %s", err))
 		}
@@ -800,11 +800,11 @@ func (s *server) includeLastVariableValues(ctx context.Context, templateVersionI
 		return nil, xerrors.Errorf("get template version: %w", err)
 	}
 
-	if templateVersion.TemplateID.UUID == uuid.Nil {
+	if templateVersion.TemplateVersion.TemplateID.UUID == uuid.Nil {
 		return values, nil
 	}
 
-	template, err := s.Database.GetTemplateByID(ctx, templateVersion.TemplateID.UUID)
+	template, err := s.Database.GetTemplateByID(ctx, templateVersion.TemplateVersion.TemplateID.UUID)
 	if err != nil {
 		return nil, xerrors.Errorf("get template: %w", err)
 	}
@@ -959,7 +959,7 @@ func (s *server) UpdateJob(ctx context.Context, request *proto.UpdateJobRequest)
 
 		for key, value := range request.WorkspaceTags {
 			_, err := s.Database.InsertTemplateVersionWorkspaceTag(ctx, database.InsertTemplateVersionWorkspaceTagParams{
-				TemplateVersionID: templateVersion.ID,
+				TemplateVersionID: templateVersion.TemplateVersion.ID,
 				Key:               key,
 				Value:             value,
 			})
@@ -990,7 +990,7 @@ func (s *server) UpdateJob(ctx context.Context, request *proto.UpdateJobRequest)
 		var variableValues []*sdkproto.VariableValue
 		var variablesWithMissingValues []string
 		for _, templateVariable := range request.TemplateVariables {
-			s.Logger.Debug(ctx, "insert template variable", slog.F("template_version_id", templateVersion.ID), slog.F("template_variable", redactTemplateVariable(templateVariable)))
+			s.Logger.Debug(ctx, "insert template variable", slog.F("template_version_id", templateVersion.TemplateVersion.ID), slog.F("template_variable", redactTemplateVariable(templateVariable)))
 
 			value := templateVariable.DefaultValue
 			for _, v := range request.UserVariableValues {
@@ -1011,7 +1011,7 @@ func (s *server) UpdateJob(ctx context.Context, request *proto.UpdateJobRequest)
 			})
 
 			_, err = s.Database.InsertTemplateVersionVariable(ctx, database.InsertTemplateVersionVariableParams{
-				TemplateVersionID: templateVersion.ID,
+				TemplateVersionID: templateVersion.TemplateVersion.ID,
 				Name:              templateVariable.Name,
 				Description:       templateVariable.Description,
 				Type:              templateVariable.Type,
@@ -1319,7 +1319,7 @@ func (s *server) prepareForNotifyWorkspaceManualBuildFailed(ctx context.Context,
 	if err != nil {
 		return nil, database.Template{}, database.TemplateVersion{}, database.User{}, xerrors.Errorf("unable to fetch workspace owner: %w", err)
 	}
-	return templateAdmins, template, templateVersion, workspaceOwner, nil
+	return templateAdmins, template, templateVersion.TemplateVersion, workspaceOwner, nil
 }
 
 func (s *server) UploadFile(stream proto.DRPCProvisionerDaemon_UploadFileStream) error {

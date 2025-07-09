@@ -350,51 +350,54 @@ func convertProvisionerJobLog(provisionerJobLog database.ProvisionerJobLog) code
 	}
 }
 
-func convertProvisionerJob(pj database.GetProvisionerJobsByIDsWithQueuePositionRow) codersdk.ProvisionerJob {
-	provisionerJob := pj.ProvisionerJob
+func convertProvisionerJob(pj database.ProvisionerJob, queuePos, queueSize int64) codersdk.ProvisionerJob {
 	job := codersdk.ProvisionerJob{
-		ID:             provisionerJob.ID,
-		OrganizationID: provisionerJob.OrganizationID,
-		CreatedAt:      provisionerJob.CreatedAt,
-		Type:           codersdk.ProvisionerJobType(provisionerJob.Type),
-		Error:          provisionerJob.Error.String,
-		ErrorCode:      codersdk.JobErrorCode(provisionerJob.ErrorCode.String),
-		FileID:         provisionerJob.FileID,
-		Tags:           provisionerJob.Tags,
-		QueuePosition:  int(pj.QueuePosition),
-		QueueSize:      int(pj.QueueSize),
+		ID:             pj.ID,
+		OrganizationID: pj.OrganizationID,
+		CreatedAt:      pj.CreatedAt,
+		Type:           codersdk.ProvisionerJobType(pj.Type),
+		Error:          pj.Error.String,
+		ErrorCode:      codersdk.JobErrorCode(pj.ErrorCode.String),
+		FileID:         pj.FileID,
+		Tags:           pj.Tags,
+		QueuePosition:  int(queuePos),
+		QueueSize:      int(queueSize),
 	}
 	// Applying values optional to the struct.
-	if provisionerJob.StartedAt.Valid {
-		job.StartedAt = &provisionerJob.StartedAt.Time
+	if pj.StartedAt.Valid {
+		job.StartedAt = &pj.StartedAt.Time
 	}
-	if provisionerJob.CompletedAt.Valid {
-		job.CompletedAt = &provisionerJob.CompletedAt.Time
+	if pj.CompletedAt.Valid {
+		job.CompletedAt = &pj.CompletedAt.Time
 	}
-	if provisionerJob.CanceledAt.Valid {
-		job.CanceledAt = &provisionerJob.CanceledAt.Time
+	if pj.CanceledAt.Valid {
+		job.CanceledAt = &pj.CanceledAt.Time
 	}
-	if provisionerJob.WorkerID.Valid {
-		job.WorkerID = &provisionerJob.WorkerID.UUID
+	if pj.WorkerID.Valid {
+		job.WorkerID = &pj.WorkerID.UUID
 	}
-	job.Status = codersdk.ProvisionerJobStatus(pj.ProvisionerJob.JobStatus)
+	job.Status = codersdk.ProvisionerJobStatus(pj.JobStatus)
 
 	// Only unmarshal input if it exists, this should only be zero in testing.
-	if len(provisionerJob.Input) > 0 {
-		if err := json.Unmarshal(provisionerJob.Input, &job.Input); err != nil {
-			job.Input.Error = xerrors.Errorf("decode input %s: %w", provisionerJob.Input, err).Error()
+	if len(pj.Input) > 0 {
+		if err := json.Unmarshal(pj.Input, &job.Input); err != nil {
+			job.Input.Error = xerrors.Errorf("decode input %s: %w", pj.Input, err).Error()
 		}
 	}
 
 	return job
 }
 
+func convertMatchedProvisioners(pj database.GetProvisionerJobsByIDsWithQueuePositionRow) *codersdk.MatchedProvisioners {
+	return &codersdk.MatchedProvisioners{
+		Count:            len(pj.ProvisionersMatched),
+		Available:        len(pj.ProvisionersAvailable),
+		MostRecentlySeen: codersdk.NewNullTime(pj.ProvisionersMatchedLastSeenAt, pj.ProvisionersMatchedLastSeenAt.IsZero()),
+	}
+}
+
 func convertProvisionerJobWithQueuePosition(pj database.GetProvisionerJobsByOrganizationAndStatusWithQueuePositionAndProvisionerRow) codersdk.ProvisionerJob {
-	job := convertProvisionerJob(database.GetProvisionerJobsByIDsWithQueuePositionRow{
-		ProvisionerJob: pj.ProvisionerJob,
-		QueuePosition:  pj.QueuePosition,
-		QueueSize:      pj.QueueSize,
-	})
+	job := convertProvisionerJob(pj.ProvisionerJob, pj.QueuePosition, pj.QueueSize)
 	job.WorkerName = pj.WorkerName
 	job.AvailableWorkers = pj.AvailableWorkers
 	job.Metadata = codersdk.ProvisionerJobMetadata{

@@ -828,7 +828,7 @@ func requestTemplate(ctx context.Context, rw http.ResponseWriter, req codersdk.C
 			})
 			return database.Template{}, false
 		}
-		if templateVersion.Archived {
+		if templateVersion.TemplateVersion.Archived {
 			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 				Message: "Archived template versions cannot be used to make a workspace.",
 				Validations: []codersdk.ValidationError{
@@ -841,7 +841,7 @@ func requestTemplate(ctx context.Context, rw http.ResponseWriter, req codersdk.C
 			return database.Template{}, false
 		}
 
-		templateID = templateVersion.TemplateID.UUID
+		templateID = templateVersion.TemplateVersion.TemplateID.UUID
 	}
 
 	template, err := db.GetTemplateByID(ctx, templateID)
@@ -928,13 +928,13 @@ func (api *API) notifyWorkspaceCreated(
 		map[string]string{
 			"workspace":                workspace.Name,
 			"template":                 template.Name,
-			"version":                  version.Name,
+			"version":                  version.TemplateVersion.Name,
 			"workspace_owner_username": owner.Username,
 		},
 		map[string]any{
 			"workspace":        map[string]any{"id": workspace.ID, "name": workspace.Name},
 			"template":         map[string]any{"id": template.ID, "name": template.Name},
-			"template_version": map[string]any{"id": version.ID, "name": version.Name},
+			"template_version": map[string]any{"id": version.TemplateVersion.ID, "name": version.TemplateVersion.Name},
 			"owner":            map[string]any{"id": owner.ID, "name": owner.Name, "email": owner.Email},
 			"parameters":       buildParameters,
 		},
@@ -1798,7 +1798,7 @@ func (api *API) resolveAutostart(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	dbVersionParams, err := api.Database.GetTemplateVersionParameters(ctx, version.ID)
+	dbVersionParams, err := api.Database.GetTemplateVersionParameters(ctx, version.TemplateVersion.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching template version parameters.",

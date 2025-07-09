@@ -89,7 +89,7 @@ func (r *loader) loadData(ctx context.Context, db database.Store) error {
 		if err != nil {
 			return xerrors.Errorf("template version: %w", err)
 		}
-		r.templateVersion = &tv
+		r.templateVersion = &tv.TemplateVersion
 	}
 
 	if r.job == nil {

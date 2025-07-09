@@ -14,10 +14,11 @@ import (
 )
 
 type templateVersionParamContextKey struct{}
+type templateVersionRowParamContextKey struct{}
 
 // TemplateVersionParam returns the template version from the ExtractTemplateVersionParam handler.
-func TemplateVersionParam(r *http.Request) database.TemplateVersion {
-	templateVersion, ok := r.Context().Value(templateVersionParamContextKey{}).(database.TemplateVersion)
+func TemplateVersionParam(r *http.Request) database.GetTemplateVersionByIDRow {
+	templateVersion, ok := r.Context().Value(templateVersionParamContextKey{}).(database.GetTemplateVersionByIDRow)
 	if !ok {
 		panic("developer error: template version param middleware not provided")
 	}
@@ -33,7 +34,7 @@ func ExtractTemplateVersionParam(db database.Store) func(http.Handler) http.Hand
 			if !parsed {
 				return
 			}
-			templateVersion, err := db.GetTemplateVersionByID(ctx, templateVersionID)
+			templateVersionRow, err := db.GetTemplateVersionByID(ctx, templateVersionID)
 			if httpapi.Is404Error(err) {
 				httpapi.ResourceNotFound(rw)
 				return
@@ -46,7 +47,7 @@ func ExtractTemplateVersionParam(db database.Store) func(http.Handler) http.Hand
 				return
 			}
 
-			template, err := db.GetTemplateByID(r.Context(), templateVersion.TemplateID.UUID)
+			template, err := db.GetTemplateByID(r.Context(), templateVersionRow.TemplateVersion.TemplateID.UUID)
 			if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
 				httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 					Message: "Internal error fetching template.",
@@ -55,8 +56,8 @@ func ExtractTemplateVersionParam(db database.Store) func(http.Handler) http.Hand
 				return
 			}
 
-			ctx = context.WithValue(ctx, templateVersionParamContextKey{}, templateVersion)
-			chi.RouteContext(ctx).URLParams.Add("organization", templateVersion.OrganizationID.String())
+			ctx = context.WithValue(ctx, templateVersionParamContextKey{}, templateVersionRow)
+			chi.RouteContext(ctx).URLParams.Add("organization", templateVersionRow.TemplateVersion.OrganizationID.String())
 
 			ctx = context.WithValue(ctx, templateParamContextKey{}, template)
 

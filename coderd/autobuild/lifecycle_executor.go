@@ -261,10 +261,11 @@ func (e *Executor) runOnce(t time.Time) Stats {
 						return xerrors.Errorf("get template by ID: %w", err)
 					}
 
-					activeTemplateVersion, err = tx.GetTemplateVersionByID(e.ctx, tmpl.ActiveVersionID)
+					tv, err := tx.GetTemplateVersionByID(e.ctx, tmpl.ActiveVersionID)
 					if err != nil {
 						return xerrors.Errorf("get active template version by ID: %w", err)
 					}
+					activeTemplateVersion = tv.TemplateVersion
 
 					accessControl := (*(e.accessControlStore.Load())).GetTemplateAccessControl(tmpl)
 

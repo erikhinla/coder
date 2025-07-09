@@ -900,7 +900,7 @@ func (c *StoreReconciler) trackResourceReplacement(ctx context.Context, workspac
 				"org":                 org.Name,
 				"workspace":           workspace.Name,
 				"template":            workspace.TemplateName,
-				"template_version":    templateVersion.Name,
+				"template_version":    templateVersion.TemplateVersion.Name,
 				"preset":              prebuildPreset.Name,
 				"workspace_build_num": fmt.Sprintf("%d", build.BuildNumber),
 				"claimant":            claimant.Username,
@@ -909,7 +909,7 @@ func (c *StoreReconciler) trackResourceReplacement(ctx context.Context, workspac
 				"replacements": repls,
 			}, "prebuilds_reconciler",
 			// Associate this notification with all the related entities.
-			workspace.ID, workspace.OwnerID, workspace.TemplateID, templateVersion.ID, prebuildPreset.ID, workspace.OrganizationID,
+			workspace.ID, workspace.OwnerID, workspace.TemplateID, templateVersion.TemplateVersion.ID, prebuildPreset.ID, workspace.OrganizationID,
 		); err != nil {
 			notifErr = errors.Join(xerrors.Errorf("send notification to %q: %w", templateAdmin.ID.String(), err))
 			continue

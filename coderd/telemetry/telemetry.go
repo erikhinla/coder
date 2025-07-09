@@ -457,7 +457,7 @@ func (r *remoteReporter) createSnapshot() (*Snapshot, error) {
 		}
 		snapshot.TemplateVersions = make([]TemplateVersion, 0, len(templateVersions))
 		for _, version := range templateVersions {
-			snapshot.TemplateVersions = append(snapshot.TemplateVersions, ConvertTemplateVersion(version))
+			snapshot.TemplateVersions = append(snapshot.TemplateVersions, ConvertTemplateVersion(version.TemplateVersion))
 		}
 		return nil
 	})

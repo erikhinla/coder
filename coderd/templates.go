@@ -235,7 +235,7 @@ func (api *API) postTemplateByOrganization(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	templateVersion, err := api.Database.GetTemplateVersionByID(ctx, createTemplate.VersionID)
+	templateVersionRow, err := api.Database.GetTemplateVersionByID(ctx, createTemplate.VersionID)
 	if errors.Is(err, sql.ErrNoRows) {
 		httpapi.Write(ctx, rw, http.StatusNotFound, codersdk.Response{
 			Message: fmt.Sprintf("Template version %q does not exist.", createTemplate.VersionID),
@@ -252,6 +252,7 @@ func (api *API) postTemplateByOrganization(rw http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
+	templateVersion := templateVersionRow.TemplateVersion
 	if templateVersion.Archived {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: fmt.Sprintf("Template version %s is archived.", createTemplate.VersionID),

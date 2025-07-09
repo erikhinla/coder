@@ -250,7 +250,7 @@ func TestMetricsCollector(t *testing.T) {
 										require.NoError(t, err)
 										require.Equal(t, 1, len(templateVersions))
 
-										presets, err := db.GetPresetsByTemplateVersionID(ctx, templateVersions[0].ID)
+										presets, err := db.GetPresetsByTemplateVersionID(ctx, templateVersions[0].TemplateVersion.ID)
 										require.NoError(t, err)
 										require.Equal(t, 1, len(presets))
 

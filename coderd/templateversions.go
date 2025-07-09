@@ -28,7 +28,6 @@ import (
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/db2sdk"
-	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/database/provisionerjobs"
 	"github.com/coder/coder/v2/coderd/externalauth"
@@ -38,7 +37,6 @@ import (
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/tracing"
-	"github.com/coder/coder/v2/coderd/util/ptr"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/examples"
 	"github.com/coder/coder/v2/provisioner/terraform/tfparse"
@@ -57,35 +55,27 @@ func (api *API) templateVersion(rw http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	templateVersion := httpmw.TemplateVersionParam(r)
 
-	jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-		IDs:             []uuid.UUID{templateVersion.JobID},
-		StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-	})
-	if err != nil || len(jobs) == 0 {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
+	// Only fetch queue position if the job is pending
+	var mp *codersdk.MatchedProvisioners
+	var queuePos, queueSize int64
+	if templateVersion.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+		// Get queue position information for pending jobs
+		jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{templateVersion.TemplateVersion.JobID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		return
-	}
-
-	var matchedProvisioners *codersdk.MatchedProvisioners
-	if jobs[0].ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		provisioners, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: jobs[0].ProvisionerJob.OrganizationID,
-			WantTags:       jobs[0].ProvisionerJob.Tags,
-		})
-		if err != nil {
-			api.Logger.Error(ctx, "failed to fetch provisioners for job id", slog.F("job_id", jobs[0].ProvisionerJob.ID), slog.Error(err))
-		} else {
-			matchedProvisioners = ptr.Ref(db2sdk.MatchedProvisioners(provisioners, dbtime.Now(), provisionerdserver.StaleInterval))
+		if err != nil || len(jobs) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error fetching provisioner job queue position.",
+				Detail:  err.Error(),
+			})
+			return
 		}
+		mp = convertMatchedProvisioners(jobs[0])
+		queuePos, queueSize = jobs[0].QueuePosition, jobs[0].QueueSize
 	}
 
-	schemas, err := api.Database.GetParameterSchemasByJobID(ctx, jobs[0].ProvisionerJob.ID)
+	schemas, err := api.Database.GetParameterSchemasByJobID(ctx, templateVersion.TemplateVersion.JobID)
 	if errors.Is(err, sql.ErrNoRows) {
 		err = nil
 	}
@@ -102,7 +92,7 @@ func (api *API) templateVersion(rw http.ResponseWriter, r *http.Request) {
 		warnings = append(warnings, codersdk.TemplateVersionWarningUnsupportedWorkspaces)
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion, convertProvisionerJob(jobs[0]), matchedProvisioners, warnings))
+	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion.TemplateVersion, templateVersion.ProvisionerJob, mp, queuePos, queueSize, warnings))
 }
 
 // @Summary Patch template version by ID
@@ -125,11 +115,11 @@ func (api *API) patchTemplateVersion(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	updateParams := database.UpdateTemplateVersionByIDParams{
-		ID:         templateVersion.ID,
-		TemplateID: templateVersion.TemplateID,
+		ID:         templateVersion.TemplateVersion.ID,
+		TemplateID: templateVersion.TemplateVersion.TemplateID,
 		UpdatedAt:  dbtime.Now(),
-		Name:       templateVersion.Name,
-		Message:    templateVersion.Message,
+		Name:       templateVersion.TemplateVersion.Name,
+		Message:    templateVersion.TemplateVersion.Message,
 	}
 
 	if params.Name != "" {
@@ -142,13 +132,13 @@ func (api *API) patchTemplateVersion(rw http.ResponseWriter, r *http.Request) {
 
 	errTemplateVersionNameConflict := xerrors.New("template version name must be unique for a template")
 
-	var updatedTemplateVersion database.TemplateVersion
+	var updated database.GetTemplateVersionByIDRow
 	err := api.Database.InTx(func(tx database.Store) error {
-		if templateVersion.TemplateID.Valid && templateVersion.Name != updateParams.Name {
+		if templateVersion.TemplateVersion.TemplateID.Valid && templateVersion.TemplateVersion.Name != updateParams.Name {
 			// User wants to rename the template version
 
 			_, err := tx.GetTemplateVersionByTemplateIDAndName(ctx, database.GetTemplateVersionByTemplateIDAndNameParams{
-				TemplateID: templateVersion.TemplateID,
+				TemplateID: templateVersion.TemplateVersion.TemplateID,
 				Name:       updateParams.Name,
 			})
 			if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
@@ -166,7 +156,7 @@ func (api *API) patchTemplateVersion(rw http.ResponseWriter, r *http.Request) {
 			return xerrors.Errorf("error on patching template version: %v", err)
 		}
 
-		updatedTemplateVersion, err = tx.GetTemplateVersionByID(ctx, updateParams.ID)
+		updated, err = tx.GetTemplateVersionByID(ctx, updateParams.ID)
 		if err != nil {
 			return xerrors.Errorf("error on fetching patched template version: %v", err)
 		}
@@ -189,35 +179,30 @@ func (api *API) patchTemplateVersion(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-		IDs:             []uuid.UUID{templateVersion.JobID},
-		StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-	})
-	if err != nil || len(jobs) == 0 {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
+	// Convert the embedded provisioner job data to SDK format
+	var mp *codersdk.MatchedProvisioners
+	var queuePos, queueSize int64
+	// Only fetch queue position if the job is pending
+	if updated.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+		// Get queue position information for pending jobs
+		jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{updated.ProvisionerJob.ID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		return
-	}
-
-	var matchedProvisioners *codersdk.MatchedProvisioners
-	if jobs[0].ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		provisioners, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: jobs[0].ProvisionerJob.OrganizationID,
-			WantTags:       jobs[0].ProvisionerJob.Tags,
-		})
-		if err != nil {
-			api.Logger.Error(ctx, "failed to fetch provisioners for job id", slog.F("job_id", jobs[0].ProvisionerJob.ID), slog.Error(err))
-		} else {
-			matchedProvisioners = ptr.Ref(db2sdk.MatchedProvisioners(provisioners, dbtime.Now(), provisionerdserver.StaleInterval))
+		if err != nil || len(jobs) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error fetching provisioner job queue position.",
+				Detail:  err.Error(),
+			})
+			return
 		}
+
+		// Update job with queue position information
+		queuePos, queueSize = jobs[0].QueuePosition, jobs[0].QueueSize
+		mp = convertMatchedProvisioners(jobs[0])
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(updatedTemplateVersion, convertProvisionerJob(jobs[0]), matchedProvisioners, nil))
+	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(updated.TemplateVersion, updated.ProvisionerJob, mp, queuePos, queueSize, nil))
 }
 
 // @Summary Cancel template version by ID
@@ -232,7 +217,7 @@ func (api *API) patchCancelTemplateVersion(rw http.ResponseWriter, r *http.Reque
 	ctx := r.Context()
 	templateVersion := httpmw.TemplateVersionParam(r)
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
+	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.TemplateVersion.JobID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching provisioner job.",
@@ -288,21 +273,13 @@ func (api *API) templateVersionRichParameters(rw http.ResponseWriter, r *http.Re
 	ctx := r.Context()
 	templateVersion := httpmw.TemplateVersionParam(r)
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
-	if err != nil {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
-		})
-		return
-	}
-	if !job.CompletedAt.Valid {
+	if !templateVersion.ProvisionerJob.CompletedAt.Valid {
 		httpapi.Write(ctx, rw, http.StatusTooEarly, codersdk.Response{
 			Message: "Template version job has not finished",
 		})
 		return
 	}
-	dbTemplateVersionParameters, err := api.Database.GetTemplateVersionParameters(ctx, templateVersion.ID)
+	dbTemplateVersionParameters, err := api.Database.GetTemplateVersionParameters(ctx, templateVersion.TemplateVersion.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching template version parameters.",
@@ -338,7 +315,7 @@ func (api *API) templateVersionExternalAuth(rw http.ResponseWriter, r *http.Requ
 	)
 
 	var rawProviders []database.ExternalAuthProvider
-	err := json.Unmarshal(templateVersion.ExternalAuthProviders, &rawProviders)
+	err := json.Unmarshal(templateVersion.TemplateVersion.ExternalAuthProviders, &rawProviders)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error reading auth config from database",
@@ -428,7 +405,7 @@ func (api *API) templateVersionVariables(rw http.ResponseWriter, r *http.Request
 	ctx := r.Context()
 	templateVersion := httpmw.TemplateVersionParam(r)
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
+	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.TemplateVersion.JobID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching provisioner job.",
@@ -442,7 +419,7 @@ func (api *API) templateVersionVariables(rw http.ResponseWriter, r *http.Request
 		})
 		return
 	}
-	dbTemplateVersionVariables, err := api.Database.GetTemplateVersionVariables(ctx, templateVersion.ID)
+	dbTemplateVersionVariables, err := api.Database.GetTemplateVersionVariables(ctx, templateVersion.TemplateVersion.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching template version variables.",
@@ -474,7 +451,7 @@ func (api *API) postTemplateVersionDryRun(rw http.ResponseWriter, r *http.Reques
 	// We use the workspace RBAC check since we don't want to allow dry runs if
 	// the user can't create workspaces.
 	if !api.Authorize(r, policy.ActionCreate,
-		rbac.ResourceWorkspace.InOrg(templateVersion.OrganizationID).WithOwner(apiKey.UserID.String())) {
+		rbac.ResourceWorkspace.InOrg(templateVersion.TemplateVersion.OrganizationID).WithOwner(apiKey.UserID.String())) {
 		httpapi.ResourceNotFound(rw)
 		return
 	}
@@ -484,7 +461,7 @@ func (api *API) postTemplateVersionDryRun(rw http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
+	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.TemplateVersion.JobID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error updating provisioner job.",
@@ -511,7 +488,7 @@ func (api *API) postTemplateVersionDryRun(rw http.ResponseWriter, r *http.Reques
 	// Marshal template version dry-run job with the parameters from the
 	// request.
 	input, err := json.Marshal(provisionerdserver.TemplateVersionDryRunJob{
-		TemplateVersionID:   templateVersion.ID,
+		TemplateVersionID:   templateVersion.TemplateVersion.ID,
 		WorkspaceName:       req.WorkspaceName,
 		RichParameterValues: richParameterValues,
 	})
@@ -538,7 +515,7 @@ func (api *API) postTemplateVersionDryRun(rw http.ResponseWriter, r *http.Reques
 		ID:             jobID,
 		CreatedAt:      dbtime.Now(),
 		UpdatedAt:      dbtime.Now(),
-		OrganizationID: templateVersion.OrganizationID,
+		OrganizationID: templateVersion.TemplateVersion.OrganizationID,
 		InitiatorID:    apiKey.UserID,
 		Provisioner:    job.Provisioner,
 		StorageMethod:  job.StorageMethod,
@@ -565,10 +542,7 @@ func (api *API) postTemplateVersionDryRun(rw http.ResponseWriter, r *http.Reques
 		api.Logger.Error(ctx, "failed to post provisioner job to pubsub", slog.Error(err))
 	}
 
-	httpapi.Write(ctx, rw, http.StatusCreated, convertProvisionerJob(database.GetProvisionerJobsByIDsWithQueuePositionRow{
-		ProvisionerJob: provisionerJob,
-		QueuePosition:  0,
-	}))
+	httpapi.Write(ctx, rw, http.StatusCreated, convertProvisionerJob(provisionerJob, 0, 0))
 }
 
 // @Summary Get template version dry-run by job ID
@@ -587,7 +561,7 @@ func (api *API) templateVersionDryRun(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertProvisionerJob(job))
+	httpapi.Write(ctx, rw, http.StatusOK, convertProvisionerJob(job.ProvisionerJob, 0, 0))
 }
 
 // @Summary Get template version dry-run matched provisioners
@@ -606,25 +580,7 @@ func (api *API) templateVersionDryRunMatchedProvisioners(rw http.ResponseWriter,
 		return
 	}
 
-	// nolint:gocritic // The user may not have permissions to read all
-	// provisioner daemons in the org.
-	daemons, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-		OrganizationID: job.ProvisionerJob.OrganizationID,
-		WantTags:       job.ProvisionerJob.Tags,
-	})
-	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-				Message: "Internal error fetching provisioner daemons by organization.",
-				Detail:  err.Error(),
-			})
-			return
-		}
-		daemons = []database.ProvisionerDaemon{}
-	}
-
-	matchedProvisioners := db2sdk.MatchedProvisioners(daemons, dbtime.Now(), provisionerdserver.StaleInterval)
-	httpapi.Write(ctx, rw, http.StatusOK, matchedProvisioners)
+	httpapi.Write(ctx, rw, http.StatusOK, convertMatchedProvisioners(job))
 }
 
 // @Summary Get template version dry-run resources by job ID
@@ -684,7 +640,7 @@ func (api *API) patchTemplateVersionDryRunCancel(rw http.ResponseWriter, r *http
 		return
 	}
 	if !api.Authorize(r, policy.ActionUpdate,
-		rbac.ResourceWorkspace.InOrg(templateVersion.OrganizationID).WithOwner(job.ProvisionerJob.InitiatorID.String())) {
+		rbac.ResourceWorkspace.InOrg(templateVersion.TemplateVersion.OrganizationID).WithOwner(job.ProvisionerJob.InitiatorID.String())) {
 		httpapi.ResourceNotFound(rw)
 		return
 	}
@@ -768,7 +724,7 @@ func (api *API) fetchTemplateVersionDryRunJob(rw http.ResponseWriter, r *http.Re
 
 	// Do a workspace resource check since it's basically a workspace dry-run.
 	if !api.Authorize(r, policy.ActionRead,
-		rbac.ResourceWorkspace.InOrg(templateVersion.OrganizationID).WithOwner(job.ProvisionerJob.InitiatorID.String())) {
+		rbac.ResourceWorkspace.InOrg(templateVersion.TemplateVersion.OrganizationID).WithOwner(job.ProvisionerJob.InitiatorID.String())) {
 		httpapi.Forbidden(rw)
 		return database.GetProvisionerJobsByIDsWithQueuePositionRow{}, false
 	}
@@ -783,7 +739,7 @@ func (api *API) fetchTemplateVersionDryRunJob(rw http.ResponseWriter, r *http.Re
 		})
 		return database.GetProvisionerJobsByIDsWithQueuePositionRow{}, false
 	}
-	if input.TemplateVersionID != templateVersion.ID {
+	if input.TemplateVersionID != templateVersion.TemplateVersion.ID {
 		httpapi.Forbidden(rw)
 		return database.GetProvisionerJobsByIDsWithQueuePositionRow{}, false
 	}
@@ -874,36 +830,43 @@ func (api *API) templateVersionsByTemplate(rw http.ResponseWriter, r *http.Reque
 			return err
 		}
 
-		jobIDs := make([]uuid.UUID, 0, len(versions))
+		// Only fetch queue position / queue size for pending jobs.
+		pendingJobs := make(map[uuid.UUID]database.GetProvisionerJobsByIDsWithQueuePositionRow)
+		var pendingJobIDs []uuid.UUID
 		for _, version := range versions {
-			jobIDs = append(jobIDs, version.JobID)
-		}
-		jobs, err := store.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-			IDs:             jobIDs,
-			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-		})
-		if err != nil {
-			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-				Message: "Internal error fetching provisioner job.",
-				Detail:  err.Error(),
-			})
-			return err
-		}
-		jobByID := map[string]database.GetProvisionerJobsByIDsWithQueuePositionRow{}
-		for _, job := range jobs {
-			jobByID[job.ProvisionerJob.ID.String()] = job
+			if version.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+				pendingJobIDs = append(pendingJobIDs, version.ProvisionerJob.ID)
+			}
 		}
 
-		for _, version := range versions {
-			job, exists := jobByID[version.JobID.String()]
-			if !exists {
+		if len(pendingJobIDs) > 0 {
+			jobs, err := store.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+				IDs:             pendingJobIDs,
+				StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
+			})
+			if err != nil {
 				httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-					Message: fmt.Sprintf("Job %q doesn't exist for version %q.", version.JobID, version.ID),
+					Message: "Internal error fetching provisioner job queue positions.",
+					Detail:  err.Error(),
 				})
 				return err
 			}
 
-			apiVersions = append(apiVersions, convertTemplateVersion(version, convertProvisionerJob(job), nil, nil))
+			for _, job := range jobs {
+				pendingJobs[job.ID] = job
+			}
+		}
+
+		for _, version := range versions {
+			if job, found := pendingJobs[version.TemplateVersion.ID]; found {
+				apiVersions = append(apiVersions, convertTemplateVersion(version.TemplateVersion, version.ProvisionerJob, convertMatchedProvisioners(job), job.QueuePosition, job.QueueSize, nil))
+				continue
+			}
+			apiVersions = append(apiVersions, convertTemplateVersion(
+				version.TemplateVersion,
+				version.ProvisionerJob,
+				convertMatchedProvisioners(database.GetProvisionerJobsByIDsWithQueuePositionRow{ProvisionerJob: version.ProvisionerJob}), 0, 0, nil),
+			)
 		}
 
 		return nil
@@ -949,34 +912,30 @@ func (api *API) templateVersionByName(rw http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-		IDs:             []uuid.UUID{templateVersion.JobID},
-		StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-	})
-	if err != nil || len(jobs) == 0 {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
+
+	// Only fetch queue position if the job is pending
+	var mp *codersdk.MatchedProvisioners
+	var queuePos, queueSize int64
+	if templateVersion.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+		// Get queue position information for pending jobs
+		jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{templateVersion.TemplateVersion.JobID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		return
-	}
-	var matchedProvisioners *codersdk.MatchedProvisioners
-	if jobs[0].ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		provisioners, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: jobs[0].ProvisionerJob.OrganizationID,
-			WantTags:       jobs[0].ProvisionerJob.Tags,
-		})
-		if err != nil {
-			api.Logger.Error(ctx, "failed to fetch provisioners for job id", slog.F("job_id", jobs[0].ProvisionerJob.ID), slog.Error(err))
-		} else {
-			matchedProvisioners = ptr.Ref(db2sdk.MatchedProvisioners(provisioners, dbtime.Now(), provisionerdserver.StaleInterval))
+		if err != nil || len(jobs) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error fetching provisioner job queue position.",
+				Detail:  err.Error(),
+			})
+			return
 		}
+
+		// Update job with queue position information
+		queuePos, queueSize = jobs[0].QueuePosition, jobs[0].QueueSize
+		mp = convertMatchedProvisioners(jobs[0])
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion, convertProvisionerJob(jobs[0]), matchedProvisioners, nil))
+	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion.TemplateVersion, templateVersion.ProvisionerJob, mp, queuePos, queueSize, nil))
 }
 
 // @Summary Get template version by organization, template, and name
@@ -1032,35 +991,30 @@ func (api *API) templateVersionByOrganizationTemplateAndName(rw http.ResponseWri
 		})
 		return
 	}
-	jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-		IDs:             []uuid.UUID{templateVersion.JobID},
-		StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-	})
-	if err != nil || len(jobs) == 0 {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
-		})
-		return
-	}
 
-	var matchedProvisioners *codersdk.MatchedProvisioners
-	if jobs[0].ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		provisioners, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: jobs[0].ProvisionerJob.OrganizationID,
-			WantTags:       jobs[0].ProvisionerJob.Tags,
+	// Only fetch queue position if the job is pending
+	var mp *codersdk.MatchedProvisioners
+	var queuePos, queueSize int64
+	if templateVersion.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+		// Get queue position information for pending jobs
+		jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{templateVersion.TemplateVersion.JobID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		if err != nil {
-			api.Logger.Error(ctx, "failed to fetch provisioners for job id", slog.F("job_id", jobs[0].ProvisionerJob.ID), slog.Error(err))
-		} else {
-			matchedProvisioners = ptr.Ref(db2sdk.MatchedProvisioners(provisioners, dbtime.Now(), provisionerdserver.StaleInterval))
+		if err != nil || len(jobs) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error fetching provisioner job queue position.",
+				Detail:  err.Error(),
+			})
+			return
 		}
+
+		// Update job with queue position information
+		queuePos, queueSize = jobs[0].QueuePosition, jobs[0].QueueSize
+		mp = convertMatchedProvisioners(jobs[0])
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion, convertProvisionerJob(jobs[0]), matchedProvisioners, nil))
+	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(templateVersion.TemplateVersion, templateVersion.ProvisionerJob, mp, queuePos, queueSize, nil))
 }
 
 // @Summary Get previous template version by organization, template, and name
@@ -1120,7 +1074,7 @@ func (api *API) previousTemplateVersionByOrganizationTemplateAndName(rw http.Res
 	previousTemplateVersion, err := api.Database.GetPreviousTemplateVersion(ctx, database.GetPreviousTemplateVersionParams{
 		OrganizationID: organization.ID,
 		Name:           templateVersionName,
-		TemplateID:     templateVersion.TemplateID,
+		TemplateID:     templateVersion.TemplateVersion.TemplateID,
 	})
 	if err != nil {
 		if httpapi.Is404Error(err) {
@@ -1137,35 +1091,29 @@ func (api *API) previousTemplateVersionByOrganizationTemplateAndName(rw http.Res
 		return
 	}
 
-	jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
-		IDs:             []uuid.UUID{previousTemplateVersion.JobID},
-		StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
-	})
-	if err != nil || len(jobs) == 0 {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching provisioner job.",
-			Detail:  err.Error(),
+	// Convert the provisioner job data from the template version row
+	// Only fetch queue position if the job is pending
+	var mp *codersdk.MatchedProvisioners
+	var queuePos, queueSize int64
+	if previousTemplateVersion.ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
+		// Get queue position information for pending jobs
+		jobs, err := api.Database.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{previousTemplateVersion.TemplateVersion.JobID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		return
-	}
-
-	var matchedProvisioners *codersdk.MatchedProvisioners
-	if jobs[0].ProvisionerJob.JobStatus == database.ProvisionerJobStatusPending {
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		provisioners, err := api.Database.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: jobs[0].ProvisionerJob.OrganizationID,
-			WantTags:       jobs[0].ProvisionerJob.Tags,
-		})
-		if err != nil {
-			api.Logger.Error(ctx, "failed to fetch provisioners for job id", slog.F("job_id", jobs[0].ProvisionerJob.ID), slog.Error(err))
-		} else {
-			matchedProvisioners = ptr.Ref(db2sdk.MatchedProvisioners(provisioners, dbtime.Now(), provisionerdserver.StaleInterval))
+		if err != nil || len(jobs) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error fetching provisioner job queue position.",
+				Detail:  err.Error(),
+			})
+			return
 		}
+
+		queuePos, queueSize = jobs[0].QueuePosition, jobs[0].QueueSize
+		mp = convertMatchedProvisioners(jobs[0])
 	}
 
-	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(previousTemplateVersion, convertProvisionerJob(jobs[0]), matchedProvisioners, nil))
+	httpapi.Write(ctx, rw, http.StatusOK, convertTemplateVersion(previousTemplateVersion.TemplateVersion, previousTemplateVersion.ProvisionerJob, mp, queuePos, queueSize, nil))
 }
 
 // @Summary Archive template unused versions by template id
@@ -1271,24 +1219,24 @@ func (api *API) setArchiveTemplateVersion(archive bool) func(rw http.ResponseWri
 				Log:            api.Logger,
 				Request:        r,
 				Action:         database.AuditActionWrite,
-				OrganizationID: templateVersion.OrganizationID,
+				OrganizationID: templateVersion.TemplateVersion.OrganizationID,
 			})
 		)
 		defer commitAudit()
-		aReq.Old = templateVersion
+		aReq.Old = templateVersion.TemplateVersion
 
 		verb := "archived"
 		if !archive {
 			verb = "unarchived"
 		}
-		if templateVersion.Archived == archive {
+		if templateVersion.TemplateVersion.Archived == archive {
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: fmt.Sprintf("Template version already %s", verb),
 			})
 			return
 		}
 
-		if !templateVersion.TemplateID.Valid {
+		if !templateVersion.TemplateVersion.TemplateID.Valid {
 			// Maybe we should allow this?
 			httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 				Message: "Cannot archive template versions not associate with a template.",
@@ -1300,8 +1248,8 @@ func (api *API) setArchiveTemplateVersion(archive bool) func(rw http.ResponseWri
 		if archive {
 			archived, archiveError := api.Database.ArchiveUnusedTemplateVersions(ctx, database.ArchiveUnusedTemplateVersionsParams{
 				UpdatedAt:         dbtime.Now(),
-				TemplateID:        templateVersion.TemplateID.UUID,
-				TemplateVersionID: templateVersion.ID,
+				TemplateID:        templateVersion.TemplateVersion.TemplateID.UUID,
+				TemplateVersionID: templateVersion.TemplateVersion.ID,
 				JobStatus:         database.NullProvisionerJobStatus{},
 			})
 
@@ -1313,7 +1261,7 @@ func (api *API) setArchiveTemplateVersion(archive bool) func(rw http.ResponseWri
 		} else {
 			err = api.Database.UnarchiveTemplateVersion(ctx, database.UnarchiveTemplateVersionParams{
 				UpdatedAt:         dbtime.Now(),
-				TemplateVersionID: templateVersion.ID,
+				TemplateVersionID: templateVersion.TemplateVersion.ID,
 			})
 		}
 
@@ -1331,7 +1279,7 @@ func (api *API) setArchiveTemplateVersion(archive bool) func(rw http.ResponseWri
 			return
 		}
 
-		httpapi.Write(ctx, rw, http.StatusOK, fmt.Sprintf("template version %q %s", templateVersion.ID.String(), verb))
+		httpapi.Write(ctx, rw, http.StatusOK, fmt.Sprintf("template version %q %s", templateVersion.TemplateVersion.ID.String(), verb))
 	}
 }
 
@@ -1379,28 +1327,21 @@ func (api *API) patchActiveTemplateVersion(rw http.ResponseWriter, r *http.Reque
 		})
 		return
 	}
-	if version.TemplateID.UUID.String() != template.ID.String() {
+	if version.TemplateVersion.TemplateID.UUID.String() != template.ID.String() {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: "The provided template version doesn't belong to the specified template.",
 		})
 		return
 	}
-	job, err := api.Database.GetProvisionerJobByID(ctx, version.JobID)
-	if err != nil {
-		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
-			Message: "Internal error fetching template version job status.",
-			Detail:  err.Error(),
-		})
-		return
-	}
-	if job.JobStatus != database.ProvisionerJobStatusSucceeded {
+
+	if version.ProvisionerJob.JobStatus != database.ProvisionerJobStatusSucceeded {
 		httpapi.Write(ctx, rw, http.StatusForbidden, codersdk.Response{
 			Message: "Only versions that have been built successfully can be promoted.",
-			Detail:  fmt.Sprintf("Attempted to promote a version with a %s build", job.JobStatus),
+			Detail:  fmt.Sprintf("Attempted to promote a version with a %s build", version.ProvisionerJob.JobStatus),
 		})
 		return
 	}
-	if version.Archived {
+	if version.TemplateVersion.Archived {
 		httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
 			Message: "The provided template version is archived.",
 		})
@@ -1601,10 +1542,11 @@ func (api *API) postTemplateVersionsByOrganization(rw http.ResponseWriter, r *ht
 	// data sources defined in the template file.
 	tags := provisionersdk.MutateTags(apiKey.UserID, parsedTags, req.ProvisionerTags)
 
-	var templateVersion database.TemplateVersion
+	var templateVersion database.GetTemplateVersionByIDRow
 	var provisionerJob database.ProvisionerJob
 	var warnings []codersdk.TemplateVersionWarning
-	var matchedProvisioners codersdk.MatchedProvisioners
+	var matchedProvisioners *codersdk.MatchedProvisioners
+	var queuePosition, queueSize int64
 	err = api.Database.InTx(func(tx database.Store) error {
 		jobID := uuid.New()
 
@@ -1654,20 +1596,20 @@ func (api *API) postTemplateVersionsByOrganization(rw http.ResponseWriter, r *ht
 			return err
 		}
 
-		// Check for eligible provisioners. This allows us to return a warning to the user if they
-		// submit a job for which no provisioner is available.
-		// nolint: gocritic // The user hitting this endpoint may not have
-		// permission to read provisioner daemons, but we want to show them
-		// information about the provisioner daemons that are available.
-		eligibleProvisioners, err := tx.GetProvisionerDaemonsByOrganization(dbauthz.AsSystemReadProvisionerDaemons(ctx), database.GetProvisionerDaemonsByOrganizationParams{
-			OrganizationID: organization.ID,
-			WantTags:       provisionerJob.Tags,
+		// Re-fetch the provisioner job to return the queue position etc.
+		createdJob, err := tx.GetProvisionerJobsByIDsWithQueuePosition(ctx, database.GetProvisionerJobsByIDsWithQueuePositionParams{
+			IDs:             []uuid.UUID{provisionerJob.ID},
+			StaleIntervalMS: provisionerdserver.StaleInterval.Milliseconds(),
 		})
-		if err != nil {
-			// Log the error but do not return any warnings. This is purely advisory and we should not block.
-			api.Logger.Error(ctx, "failed to check eligible provisioner daemons for job", slog.Error(err))
+		if err != nil || len(createdJob) == 0 {
+			httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
+				Message: "Internal error creating template version.",
+				Detail:  xerrors.Errorf("get provisioner job by id: %w", err).Error(),
+			})
+			return err
 		}
-		matchedProvisioners = db2sdk.MatchedProvisioners(eligibleProvisioners, provisionerJob.CreatedAt, provisionerdserver.StaleInterval)
+		queuePosition, queueSize = createdJob[0].QueuePosition, createdJob[0].QueueSize
+		matchedProvisioners := convertMatchedProvisioners(createdJob[0])
 		if matchedProvisioners.Count == 0 {
 			api.Logger.Warn(ctx, "no matching provisioners found for job",
 				slog.F("user_id", apiKey.UserID),
@@ -1745,7 +1687,7 @@ func (api *API) postTemplateVersionsByOrganization(rw http.ResponseWriter, r *ht
 		// Each failure case in the tx should have already written a response.
 		return
 	}
-	aReq.New = templateVersion
+	aReq.New = templateVersion.TemplateVersion
 	err = provisionerjobs.PostJob(api.Pubsub, provisionerJob)
 	if err != nil {
 		// Client probably doesn't care about this error, so just log it.
@@ -1753,12 +1695,11 @@ func (api *API) postTemplateVersionsByOrganization(rw http.ResponseWriter, r *ht
 	}
 
 	httpapi.Write(ctx, rw, http.StatusCreated, convertTemplateVersion(
-		templateVersion,
-		convertProvisionerJob(database.GetProvisionerJobsByIDsWithQueuePositionRow{
-			ProvisionerJob: provisionerJob,
-			QueuePosition:  0,
-		}),
-		&matchedProvisioners,
+		templateVersion.TemplateVersion,
+		templateVersion.ProvisionerJob,
+		matchedProvisioners,
+		queuePosition,
+		queueSize,
 		warnings))
 }
 
@@ -1881,7 +1822,7 @@ func (api *API) templateVersionResources(rw http.ResponseWriter, r *http.Request
 		templateVersion = httpmw.TemplateVersionParam(r)
 	)
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
+	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.TemplateVersion.JobID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching provisioner job.",
@@ -1914,7 +1855,7 @@ func (api *API) templateVersionLogs(rw http.ResponseWriter, r *http.Request) {
 		templateVersion = httpmw.TemplateVersionParam(r)
 	)
 
-	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.JobID)
+	job, err := api.Database.GetProvisionerJobByID(ctx, templateVersion.TemplateVersion.JobID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching provisioner job.",
@@ -1925,7 +1866,7 @@ func (api *API) templateVersionLogs(rw http.ResponseWriter, r *http.Request) {
 	api.provisionerJobLogs(rw, r, job)
 }
 
-func convertTemplateVersion(version database.TemplateVersion, job codersdk.ProvisionerJob, matchedProvisioners *codersdk.MatchedProvisioners, warnings []codersdk.TemplateVersionWarning) codersdk.TemplateVersion {
+func convertTemplateVersion(version database.TemplateVersion, job database.ProvisionerJob, mp *codersdk.MatchedProvisioners, queuePos, queueSize int64, warnings []codersdk.TemplateVersionWarning) codersdk.TemplateVersion {
 	return codersdk.TemplateVersion{
 		ID:             version.ID,
 		TemplateID:     &version.TemplateID.UUID,
@@ -1934,7 +1875,7 @@ func convertTemplateVersion(version database.TemplateVersion, job codersdk.Provi
 		UpdatedAt:      version.UpdatedAt,
 		Name:           version.Name,
 		Message:        version.Message,
-		Job:            job,
+		Job:            convertProvisionerJob(job, queuePos, queueSize),
 		Readme:         version.Readme,
 		CreatedBy: codersdk.MinimalUser{
 			ID:        version.CreatedBy,
@@ -1943,7 +1884,7 @@ func convertTemplateVersion(version database.TemplateVersion, job codersdk.Provi
 		},
 		Archived:            version.Archived,
 		Warnings:            warnings,
-		MatchedProvisioners: matchedProvisioners,
+		MatchedProvisioners: mp,
 	}
 }
 

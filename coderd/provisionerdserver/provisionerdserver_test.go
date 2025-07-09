@@ -800,7 +800,7 @@ func TestUpdateJob(t *testing.T) {
 
 		version, err := db.GetTemplateVersionByID(ctx, versionID)
 		require.NoError(t, err)
-		require.Equal(t, "# hello world", version.Readme)
+		require.Equal(t, "# hello world", version.TemplateVersion.Readme)
 	})
 
 	t.Run("TemplateVariables", func(t *testing.T) {
@@ -2518,9 +2518,9 @@ func TestCompleteJob(t *testing.T) {
 					})
 					require.NoError(t, err)
 
-					version, err = db.GetTemplateVersionByID(ctx, tvID)
+					updated, err := db.GetTemplateVersionByID(ctx, tvID)
 					require.NoError(t, err)
-					require.False(t, version.HasAITask.Valid) // Value should be nil (i.e. valid = false).
+					require.False(t, updated.TemplateVersion.HasAITask.Valid) // Value should be nil (i.e. valid = false).
 
 					completedJob := proto.CompletedJob{
 						JobId: job.ID.String(),
@@ -2531,10 +2531,10 @@ func TestCompleteJob(t *testing.T) {
 					_, err = srv.CompleteJob(ctx, &completedJob)
 					require.NoError(t, err)
 
-					version, err = db.GetTemplateVersionByID(ctx, tvID)
+					updated, err = db.GetTemplateVersionByID(ctx, tvID)
 					require.NoError(t, err)
-					require.True(t, version.HasAITask.Valid) // We ALWAYS expect a value to be set, therefore not nil, i.e. valid = true.
-					require.Equal(t, tc.expected, version.HasAITask.Bool)
+					require.True(t, updated.TemplateVersion.HasAITask.Valid) // We ALWAYS expect a value to be set, therefore not nil, i.e. valid = true.
+					require.Equal(t, tc.expected, updated.TemplateVersion.HasAITask.Bool)
 				})
 			}
 		})

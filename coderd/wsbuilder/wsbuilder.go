@@ -563,7 +563,7 @@ func (b *Builder) getTemplateVersion() (*database.TemplateVersion, error) {
 	if err != nil {
 		return nil, xerrors.Errorf("get template version %s: %w", id, err)
 	}
-	b.templateVersion = &v
+	b.templateVersion = &v.TemplateVersion
 	return b.templateVersion, err
 }
 

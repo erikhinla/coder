@@ -184,7 +184,7 @@ func TestPostTemplateVersionsByOrganization(t *testing.T) {
 		require.NoError(t, err)
 		tvDB, err := db.GetTemplateVersionByID(dbauthz.As(ctx, coderdtest.AuthzUserSubject(admin, user.OrganizationID)), version.ID)
 		require.NoError(t, err)
-		require.False(t, tvDB.SourceExampleID.Valid)
+		require.False(t, tvDB.TemplateVersion.SourceExampleID.Valid)
 	})
 
 	t.Run("Example", func(t *testing.T) {
@@ -234,7 +234,7 @@ func TestPostTemplateVersionsByOrganization(t *testing.T) {
 		require.NoError(t, err)
 		tvDB, err := db.GetTemplateVersionByID(dbauthz.As(ctx, coderdtest.AuthzUserSubject(admin, user.OrganizationID)), tv.ID)
 		require.NoError(t, err)
-		require.Equal(t, ls[0].ID, tvDB.SourceExampleID.String)
+		require.Equal(t, ls[0].ID, tvDB.TemplateVersion.SourceExampleID.String)
 
 		// ensure the template tar was uploaded correctly
 		fl, ct, err := client.Download(ctx, tv.Job.FileID)

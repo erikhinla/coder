@@ -20,7 +20,7 @@ func (api *API) templateVersionPresets(rw http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	templateVersion := httpmw.TemplateVersionParam(r)
 
-	presets, err := api.Database.GetPresetsByTemplateVersionID(ctx, templateVersion.ID)
+	presets, err := api.Database.GetPresetsByTemplateVersionID(ctx, templateVersion.TemplateVersion.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching template version presets.",
@@ -29,7 +29,7 @@ func (api *API) templateVersionPresets(rw http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	presetParams, err := api.Database.GetPresetParametersByTemplateVersionID(ctx, templateVersion.ID)
+	presetParams, err := api.Database.GetPresetParametersByTemplateVersionID(ctx, templateVersion.TemplateVersion.ID)
 	if err != nil {
 		httpapi.Write(ctx, rw, http.StatusInternalServerError, codersdk.Response{
 			Message: "Internal error fetching template version presets.",

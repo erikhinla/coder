@@ -89,7 +89,7 @@ func (api *API) workspaceBuild(rw http.ResponseWriter, r *http.Request) {
 		data.appStatuses,
 		data.scripts,
 		data.logSources,
-		data.templateVersions[0],
+		data.templateVersions[0].TemplateVersion,
 		nil,
 	)
 	if err != nil {
@@ -299,7 +299,7 @@ func (api *API) workspaceBuildByBuildNumber(rw http.ResponseWriter, r *http.Requ
 		data.appStatuses,
 		data.scripts,
 		data.logSources,
-		data.templateVersions[0],
+		data.templateVersions[0].TemplateVersion,
 		data.provisionerDaemons,
 	)
 	if err != nil {
@@ -557,13 +557,13 @@ func (api *API) notifyWorkspaceUpdated(
 			"initiator":                initiator.Name,
 			"workspace":                workspace.Name,
 			"template":                 template.Name,
-			"version":                  version.Name,
+			"version":                  version.TemplateVersion.Name,
 			"workspace_owner_username": owner.Username,
 		},
 		map[string]any{
 			"workspace":        map[string]any{"id": workspace.ID, "name": workspace.Name},
 			"template":         map[string]any{"id": template.ID, "name": template.Name},
-			"template_version": map[string]any{"id": version.ID, "name": version.Name},
+			"template_version": map[string]any{"id": version.TemplateVersion.ID, "name": version.TemplateVersion.Name},
 			"owner":            map[string]any{"id": owner.ID, "name": owner.Name, "email": owner.Email},
 			"parameters":       buildParameters,
 		},
@@ -833,7 +833,7 @@ func (api *API) workspaceBuildTimings(rw http.ResponseWriter, r *http.Request) {
 
 type workspaceBuildsData struct {
 	jobs               []database.GetProvisionerJobsByIDsWithQueuePositionRow
-	templateVersions   []database.TemplateVersion
+	templateVersions   []database.GetTemplateVersionsByIDsRow
 	resources          []database.WorkspaceResource
 	metadata           []database.WorkspaceResourceMetadatum
 	agents             []database.WorkspaceAgent
@@ -988,7 +988,7 @@ func (api *API) convertWorkspaceBuilds(
 	agentAppStatuses []database.WorkspaceAppStatus,
 	agentScripts []database.WorkspaceAgentScript,
 	agentLogSources []database.WorkspaceAgentLogSource,
-	templateVersions []database.TemplateVersion,
+	templateVersions []database.GetTemplateVersionsByIDsRow,
 	provisionerDaemons []database.GetEligibleProvisionerDaemonsByProvisionerJobIDsRow,
 ) ([]codersdk.WorkspaceBuild, error) {
 	workspaceByID := map[uuid.UUID]database.Workspace{}
@@ -1001,7 +1001,7 @@ func (api *API) convertWorkspaceBuilds(
 	}
 	templateVersionByID := map[uuid.UUID]database.TemplateVersion{}
 	for _, templateVersion := range templateVersions {
-		templateVersionByID[templateVersion.ID] = templateVersion
+		templateVersionByID[templateVersion.TemplateVersion.ID] = templateVersion.TemplateVersion
 	}
 
 	// Should never be nil for API consistency
@@ -1089,7 +1089,7 @@ func (api *API) convertWorkspaceBuild(
 		}
 		provisionerDaemonsForThisWorkspaceBuild = append(provisionerDaemonsForThisWorkspaceBuild, provisionerDaemon.ProvisionerDaemon)
 	}
-	matchedProvisioners := db2sdk.MatchedProvisioners(provisionerDaemonsForThisWorkspaceBuild, job.ProvisionerJob.CreatedAt, provisionerdserver.StaleInterval)
+	matchedProvisioners := convertMatchedProvisioners(job)
 	statusesByAgentID := map[uuid.UUID][]database.WorkspaceAppStatus{}
 	for _, status := range agentAppStatuses {
 		statusesByAgentID[status.AgentID] = append(statusesByAgentID[status.AgentID], status)
@@ -1151,7 +1151,7 @@ func (api *API) convertWorkspaceBuild(
 		aiTasksSidebarAppID = &build.AITaskSidebarAppID.UUID
 	}
 
-	apiJob := convertProvisionerJob(job)
+	apiJob := convertProvisionerJob(job.ProvisionerJob, job.QueuePosition, job.QueueSize)
 	transition := codersdk.WorkspaceTransition(build.Transition)
 	return codersdk.WorkspaceBuild{
 		ID:                      build.ID,
@@ -1175,7 +1175,7 @@ func (api *API) convertWorkspaceBuild(
 		Resources:               apiResources,
 		Status:                  codersdk.ConvertWorkspaceStatus(apiJob.Status, transition),
 		DailyCost:               build.DailyCost,
-		MatchedProvisioners:     &matchedProvisioners,
+		MatchedProvisioners:     matchedProvisioners,
 		TemplateVersionPresetID: presetID,
 		HasAITask:               hasAITask,
 		AITaskSidebarAppID:      aiTasksSidebarAppID,
