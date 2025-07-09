@@ -12188,7 +12188,7 @@ SELECT
 FROM
 	template_version_with_user
 JOIN
-	provisioner_jobs pj ON template_versions.job_id = pj.id
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
 	template_version_with_user.id = $1
 `
@@ -12462,7 +12462,7 @@ WHERE
 		-- The called should always provide a filter if they want to omit
 		-- archived versions.
 		WHEN $2 :: boolean IS NULL THEN true
-		ELSE template_versions.archived = $2 :: boolean
+		ELSE template_version_with_user.archived = $2 :: boolean
 	END
 	AND CASE
 		-- This allows using the last element on a page as effectively a cursor.
