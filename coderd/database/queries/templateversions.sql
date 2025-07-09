@@ -1,9 +1,11 @@
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetTemplateVersionsByTemplateID :many
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(provisioner_jobs)
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
 	template_id = @template_id :: uuid
 	  AND CASE
@@ -40,43 +42,59 @@ LIMIT
 	-- A null limit means "no limit", so 0 means return all
 	NULLIF(@limit_opt :: int, 0);
 
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetTemplateVersionByJobID :one
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(provisioner_jobs)
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
-	job_id = $1;
+	template_version_with_user.job_id = $1;
 
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetTemplateVersionsCreatedAfter :many
-SELECT * FROM template_version_with_user AS template_versions WHERE created_at > $1;
+SELECT
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(provisioner_jobs)
+FROM
+	template_version_with_user
+JOIN
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_job.id
+WHERE
+	template_version_with_user.created_at > $1;
 
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetTemplateVersionByTemplateIDAndName :one
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(pj) AS provisioner_job
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
-	template_id = $1
-	AND "name" = $2;
+	template_version_with_user.template_id = $1
+	AND template_version_with_user."name" = $2;
 
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetTemplateVersionByID :one
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(pj)
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_versions.job_id = pj.id
 WHERE
-	id = $1;
+	template_version_with_user.id = $1;
 
 -- name: GetTemplateVersionsByIDs :many
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(pj)
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
 	id = ANY(@ids :: uuid [ ]);
 
@@ -136,21 +154,23 @@ SET
 WHERE
 	job_id = $1;
 
--- TODO(cian): also return related provisioner job for active template version
 -- name: GetPreviousTemplateVersion :one
 SELECT
-	*
+	sqlc.embed(template_version_with_user),
+	sqlc.embed(pj)
 FROM
-	template_version_with_user AS template_versions
+	template_version_with_user
+JOIN
+	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
 WHERE
-	created_at < (
-		SELECT created_at
+	template_version_with_user.created_at < (
+		SELECT tv.created_at
 		FROM template_version_with_user AS tv
 		WHERE tv.organization_id = $1 AND tv.name = $2 AND tv.template_id = $3
 	)
-	AND organization_id = $1
-	AND template_id = $3
-ORDER BY created_at DESC
+	AND template_version_with_user.organization_id = $1
+	AND template_version_with_user.template_id = $3
+ORDER BY template_version_with_user.created_at DESC
 LIMIT 1;
 
 -- name: UnarchiveTemplateVersion :exec
