@@ -8286,11 +8286,12 @@ ranked_jobs AS (
 	SELECT
 		pj.id,
 		pj.created_at,
-		ROW_NUMBER() OVER (PARTITION BY mpd.id ORDER BY pj.created_at ASC) AS queue_position,
-		COUNT(*) OVER (PARTITION BY mpd.id) AS queue_size
+		ROW_NUMBER() OVER (PARTITION BY opd.id ORDER BY pj.created_at ASC) AS queue_position,
+		COUNT(*) OVER (PARTITION BY opd.id) AS queue_size
 	FROM pending_jobs pj
 	-- Join only on the small pending set
-	INNER JOIN matching_provisioner_daemons mpd ON provisioner_tagset_contains(mpd.tags, pj.tags)
+	INNER JOIN online_provisioner_daemons opd ON provisioner_tagset_contains(opd.tags, pj.tags)
+	WHERE opd.id NOT IN (SELECT id FROM busy_provisioner_daemons)
 ),
 final_jobs AS (
 	-- Step 9: Compute best queue position and max queue size per job
@@ -8316,13 +8317,13 @@ SELECT
 	fj.queue_size,
 	mpc.ids::uuid[] AS provisioners_matched,
 	apd.ids::uuid[] AS provisioners_available,
-	apd.last_seen_at::timestamptz AS provisioners_matched_last_seen_at
+	COALESCE(apd.last_seen_at, '0001-01-01 00:00:00+00'::timestamptz)::timestamptz AS provisioners_matched_last_seen_at
 FROM final_jobs fj
 	-- Ensure we retrieve full details from ` + "`" + `provisioner_jobs` + "`" + `.
 	-- JOIN with pj is required for sqlc.embed(pj) to compile successfully.
 INNER JOIN provisioner_jobs pj ON fj.id = pj.id
-LEFT JOIN matching_provisioner_count mpc ON provisioner_tagset_contains(mpc.tags, pj.tags)
-LEFT JOIN available_provisioner_daemons apd ON provisioner_tagset_contains(apd.tags, pj.tags)
+LEFT JOIN matching_provisioner_count mpc ON mpc.tags = pj.tags
+LEFT JOIN available_provisioner_daemons apd ON apd.tags = pj.tags
 ORDER BY fj.created_at
 `
 
