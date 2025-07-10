@@ -2099,26 +2099,27 @@ type tvArgs struct {
 // createTemplateVersion is a helper function to create a version with its dependencies.
 func createTemplateVersion(t testing.TB, db database.Store, tpl database.Template, args tvArgs) database.TemplateVersion {
 	t.Helper()
-	version := dbgen.TemplateVersion(t, db, database.TemplateVersion{
-		TemplateID: uuid.NullUUID{
-			UUID:  tpl.ID,
-			Valid: true,
-		},
-		OrganizationID: tpl.OrganizationID,
-		CreatedAt:      dbtime.Now(),
-		UpdatedAt:      dbtime.Now(),
-		CreatedBy:      tpl.CreatedBy,
-	})
-
-	latestJob := database.ProvisionerJob{
-		ID:             version.JobID,
+	importJob := database.ProvisionerJob{
+		ID:             uuid.New(),
 		Error:          sql.NullString{},
 		OrganizationID: tpl.OrganizationID,
 		InitiatorID:    tpl.CreatedBy,
 		Type:           database.ProvisionerJobTypeTemplateVersionImport,
 	}
-	setJobStatus(t, args.Status, &latestJob)
-	dbgen.ProvisionerJob(t, db, nil, latestJob)
+	setJobStatus(t, args.Status, &importJob)
+	dbgen.ProvisionerJob(t, db, nil, importJob)
+
+	version := dbgen.TemplateVersion(t, db, database.TemplateVersion{
+		TemplateID: uuid.NullUUID{
+			UUID:  tpl.ID,
+			Valid: true,
+		},
+		JobID:          importJob.ID,
+		OrganizationID: tpl.OrganizationID,
+		CreatedAt:      dbtime.Now(),
+		UpdatedAt:      dbtime.Now(),
+		CreatedBy:      tpl.CreatedBy,
+	})
 	if args.CreateWorkspace {
 		wrk := dbgen.Workspace(t, db, database.WorkspaceTable{
 			ID:             args.WorkspaceID,
@@ -2132,15 +2133,15 @@ func createTemplateVersion(t testing.TB, db database.Store, tpl database.Templat
 		if args.WorkspaceTransition != "" {
 			trans = args.WorkspaceTransition
 		}
-		latestJob = database.ProvisionerJob{
+		buildJob := database.ProvisionerJob{
 			Type:           database.ProvisionerJobTypeWorkspaceBuild,
 			InitiatorID:    tpl.CreatedBy,
 			OrganizationID: tpl.OrganizationID,
 		}
-		setJobStatus(t, args.Status, &latestJob)
-		latestJob = dbgen.ProvisionerJob(t, db, nil, latestJob)
+		setJobStatus(t, args.Status, &buildJob)
+		buildJob = dbgen.ProvisionerJob(t, db, nil, buildJob)
 		latestResource := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{
-			JobID: latestJob.ID,
+			JobID: buildJob.ID,
 		})
 		dbgen.WorkspaceBuild(t, db, database.WorkspaceBuild{
 			WorkspaceID:       wrk.ID,
@@ -2148,18 +2149,18 @@ func createTemplateVersion(t testing.TB, db database.Store, tpl database.Templat
 			BuildNumber:       1,
 			Transition:        trans,
 			InitiatorID:       tpl.CreatedBy,
-			JobID:             latestJob.ID,
+			JobID:             buildJob.ID,
 		})
 		for i := 0; i < args.ExtraBuilds; i++ {
-			latestJob = database.ProvisionerJob{
+			buildJob = database.ProvisionerJob{
 				Type:           database.ProvisionerJobTypeWorkspaceBuild,
 				InitiatorID:    tpl.CreatedBy,
 				OrganizationID: tpl.OrganizationID,
 			}
-			setJobStatus(t, args.Status, &latestJob)
-			latestJob = dbgen.ProvisionerJob(t, db, nil, latestJob)
+			setJobStatus(t, args.Status, &buildJob)
+			buildJob = dbgen.ProvisionerJob(t, db, nil, buildJob)
 			latestResource = dbgen.WorkspaceResource(t, db, database.WorkspaceResource{
-				JobID: latestJob.ID,
+				JobID: buildJob.ID,
 			})
 			dbgen.WorkspaceBuild(t, db, database.WorkspaceBuild{
 				WorkspaceID:       wrk.ID,
@@ -2168,7 +2169,7 @@ func createTemplateVersion(t testing.TB, db database.Store, tpl database.Templat
 				BuildNumber: int32(i) + 2,
 				Transition:  trans,
 				InitiatorID: tpl.CreatedBy,
-				JobID:       latestJob.ID,
+				JobID:       buildJob.ID,
 			})
 		}
 
