@@ -396,6 +396,24 @@ func (t TemplateVersionBuilder) Do() TemplateVersionResponse {
 			UUID:  resp.Template.ID,
 		}
 	}
+	payload, err := json.Marshal(provisionerdserver.TemplateVersionImportJob{
+		TemplateVersionID: t.seed.ID,
+	})
+	require.NoError(t.t, err)
+
+	t.seed.JobID = takeFirst(t.seed.JobID, uuid.New())
+	job := dbgen.ProvisionerJob(t.t, t.db, t.ps, database.ProvisionerJob{
+		ID:             t.seed.JobID,
+		OrganizationID: t.seed.OrganizationID,
+		InitiatorID:    t.seed.CreatedBy,
+		Type:           database.ProvisionerJobTypeTemplateVersionImport,
+		Input:          payload,
+		CompletedAt: sql.NullTime{
+			Time:  dbtime.Now(),
+			Valid: true,
+		},
+		FileID: t.fileID,
+	})
 
 	version := dbgen.TemplateVersion(t.t, t.db, t.seed)
 	if t.promote {
@@ -427,26 +445,6 @@ func (t TemplateVersionBuilder) Do() TemplateVersionResponse {
 			Values:                  []string{presetParam.Value},
 		})
 	}
-
-	payload, err := json.Marshal(provisionerdserver.TemplateVersionImportJob{
-		TemplateVersionID: t.seed.ID,
-	})
-	require.NoError(t.t, err)
-
-	job := dbgen.ProvisionerJob(t.t, t.db, t.ps, database.ProvisionerJob{
-		ID:             version.JobID,
-		OrganizationID: t.seed.OrganizationID,
-		InitiatorID:    t.seed.CreatedBy,
-		Type:           database.ProvisionerJobTypeTemplateVersionImport,
-		Input:          payload,
-		CompletedAt: sql.NullTime{
-			Time:  dbtime.Now(),
-			Valid: true,
-		},
-		FileID: t.fileID,
-	})
-
-	t.seed.JobID = job.ID
 
 	ProvisionerJobResources(t.t, t.db, job.ID, "", t.resources...).Do()
 

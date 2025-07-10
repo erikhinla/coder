@@ -978,10 +978,11 @@ func ExternalAuthLink(t testing.TB, db database.Store, orig database.ExternalAut
 
 func TemplateVersion(t testing.TB, db database.Store, orig database.TemplateVersion) database.TemplateVersion {
 	var version database.GetTemplateVersionByIDRow
-	hasAITask := takeFirst(orig.HasAITask, sql.NullBool{})
-	jobID := takeFirst(orig.JobID, uuid.New())
+
 	err := db.InTx(func(db database.Store) error {
 		versionID := takeFirst(orig.ID, uuid.New())
+		hasAITask := takeFirst(orig.HasAITask, sql.NullBool{})
+		jobID := takeFirst(orig.JobID, uuid.New())
 		err := db.InsertTemplateVersion(genCtx, database.InsertTemplateVersionParams{
 			ID:              versionID,
 			TemplateID:      takeFirst(orig.TemplateID, uuid.NullUUID{}),
@@ -1005,6 +1006,11 @@ func TemplateVersion(t testing.TB, db database.Store, orig database.TemplateVers
 				HasAITask: hasAITask,
 				UpdatedAt: dbtime.Now(),
 			}))
+		}
+
+		// Create the provisioner job if it has not yet been created.
+		if orig.JobID == uuid.Nil {
+			_ = ProvisionerJob(t, db, nil, database.ProvisionerJob{ID: jobID})
 		}
 
 		version, err = db.GetTemplateVersionByID(genCtx, versionID)
