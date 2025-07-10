@@ -13,8 +13,10 @@ import (
 	"github.com/coder/coder/v2/codersdk"
 )
 
-type templateVersionParamContextKey struct{}
-type templateVersionRowParamContextKey struct{}
+type (
+	templateVersionParamContextKey    struct{}
+	templateVersionRowParamContextKey struct{}
+)
 
 // TemplateVersionParam returns the template version from the ExtractTemplateVersionParam handler.
 func TemplateVersionParam(r *http.Request) database.GetTemplateVersionByIDRow {
