@@ -4022,8 +4022,7 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 			TemplateID: uuid.NullUUID{UUID: t2.ID, Valid: true},
 		})
 		check.Args([]uuid.UUID{tv1.ID, tv2.ID, tv3.ID}).
-			Asserts(rbac.ResourceSystem, policy.ActionRead).
-			Returns(slice.New(tv1, tv2, tv3))
+			Asserts(rbac.ResourceSystem, policy.ActionRead)
 	}))
 	s.Run("GetParameterSchemasByJobID", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)

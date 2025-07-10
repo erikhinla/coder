@@ -90,13 +90,13 @@ WHERE
 -- name: GetTemplateVersionsByIDs :many
 SELECT
 	sqlc.embed(template_version_with_user),
-	sqlc.embed(pj)
+	sqlc.embed(provisioner_jobs)
 FROM
 	template_version_with_user
 JOIN
-	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
-	id = ANY(@ids :: uuid [ ]);
+	template_version_with_user.id = ANY(@ids :: uuid [ ]);
 
 -- name: InsertTemplateVersion :exec
 INSERT INTO

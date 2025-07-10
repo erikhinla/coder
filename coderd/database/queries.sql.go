@@ -12374,13 +12374,13 @@ func (q *sqlQuerier) GetTemplateVersionByTemplateIDAndName(ctx context.Context, 
 const getTemplateVersionsByIDs = `-- name: GetTemplateVersionsByIDs :many
 SELECT
 	template_version_with_user.id, template_version_with_user.template_id, template_version_with_user.organization_id, template_version_with_user.created_at, template_version_with_user.updated_at, template_version_with_user.name, template_version_with_user.readme, template_version_with_user.job_id, template_version_with_user.created_by, template_version_with_user.external_auth_providers, template_version_with_user.message, template_version_with_user.archived, template_version_with_user.source_example_id, template_version_with_user.has_ai_task, template_version_with_user.created_by_avatar_url, template_version_with_user.created_by_username, template_version_with_user.created_by_name,
-	pj.id, pj.created_at, pj.updated_at, pj.started_at, pj.canceled_at, pj.completed_at, pj.error, pj.organization_id, pj.initiator_id, pj.provisioner, pj.storage_method, pj.type, pj.input, pj.worker_id, pj.file_id, pj.tags, pj.error_code, pj.trace_metadata, pj.job_status
+	provisioner_jobs.id, provisioner_jobs.created_at, provisioner_jobs.updated_at, provisioner_jobs.started_at, provisioner_jobs.canceled_at, provisioner_jobs.completed_at, provisioner_jobs.error, provisioner_jobs.organization_id, provisioner_jobs.initiator_id, provisioner_jobs.provisioner, provisioner_jobs.storage_method, provisioner_jobs.type, provisioner_jobs.input, provisioner_jobs.worker_id, provisioner_jobs.file_id, provisioner_jobs.tags, provisioner_jobs.error_code, provisioner_jobs.trace_metadata, provisioner_jobs.job_status
 FROM
 	template_version_with_user
 JOIN
-	provisioner_jobs pj ON template_version_with_user.job_id = pj.id
+	provisioner_jobs ON template_version_with_user.job_id = provisioner_jobs.id
 WHERE
-	id = ANY($1 :: uuid [ ])
+	template_version_with_user.id = ANY($1 :: uuid [ ])
 `
 
 type GetTemplateVersionsByIDsRow struct {
