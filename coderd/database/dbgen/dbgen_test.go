@@ -193,7 +193,8 @@ func TestGenerator(t *testing.T) {
 		db, _ := dbtestutil.NewDB(t)
 		dbtestutil.DisableForeignKeysAndTriggers(t, db)
 		exp := dbgen.TemplateVersion(t, db, database.TemplateVersion{})
-		require.Equal(t, exp, must(db.GetTemplateVersionByID(context.Background(), exp.ID)))
+		require.Equal(t, exp, must(db.GetTemplateVersionByID(context.Background(), exp.ID)).TemplateVersion)
+		require.NotEmpty(t, must(db.GetTemplateVersionByID(context.Background(), exp.ID)).ProvisionerJob)
 	})
 
 	t.Run("WorkspaceBuild", func(t *testing.T) {
