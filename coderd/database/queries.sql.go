@@ -12473,7 +12473,7 @@ WHERE
 			-- The pagination cursor is the last ID of the previous page.
 			-- The query is ordered by the created_at field, so select all
 			-- rows after the cursor.
-			(created_at, id) > (
+			(template_version_with_user.created_at, template_version_with_user.id) > (
 				SELECT
 					created_at, id
 				FROM
@@ -12487,7 +12487,7 @@ WHERE
 ORDER BY
     -- Deterministic and consistent ordering of all rows, even if they share
     -- a timestamp. This is to ensure consistent pagination.
-	(created_at, id) ASC OFFSET $4
+	(template_version_with_user.created_at, template_version_with_user.id) ASC OFFSET $4
 LIMIT
 	-- A null limit means "no limit", so 0 means return all
 	NULLIF($5 :: int, 0)
