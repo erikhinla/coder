@@ -112,7 +112,7 @@ export const AppearanceSettingsPageView: FC<
           corner of the dashboard."
 				validation={
 					isEntitled
-						? "An image with transparency and an aspect ratio of 3:1 or less will look best."
+						? "We recommend a transparent image with 3:1 aspect ratio."
 						: "This is an Enterprise only feature."
 				}
 				onSubmit={logoForm.handleSubmit}

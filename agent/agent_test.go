@@ -2130,7 +2130,7 @@ func TestAgent_DevcontainerAutostart(t *testing.T) {
 		"name": "mywork",
 		"image": "ubuntu:latest",
 		"cmd": ["sleep", "infinity"],
-		"runArgs": ["--network=host", "--label=`+agentcontainers.DevcontainerIsTestRunLabel+`=true"]
+		"runArgs": ["--network=host"]
     }`), 0o600)
 	require.NoError(t, err, "write devcontainer.json")
 
@@ -2167,7 +2167,6 @@ func TestAgent_DevcontainerAutostart(t *testing.T) {
 			// Only match this specific dev container.
 			agentcontainers.WithClock(mClock),
 			agentcontainers.WithContainerLabelIncludeFilter("devcontainer.local_folder", tempWorkspaceFolder),
-			agentcontainers.WithContainerLabelIncludeFilter(agentcontainers.DevcontainerIsTestRunLabel, "true"),
 			agentcontainers.WithSubAgentURL(srv.URL),
 			// The agent will copy "itself", but in the case of this test, the
 			// agent is actually this test binary. So we'll tell the test binary
@@ -2289,8 +2288,7 @@ func TestAgent_DevcontainerRecreate(t *testing.T) {
 	err = os.WriteFile(devcontainerFile, []byte(`{
         "name": "mywork",
         "image": "busybox:latest",
-        "cmd": ["sleep", "infinity"],
-		"runArgs": ["--label=`+agentcontainers.DevcontainerIsTestRunLabel+`=true"]
+        "cmd": ["sleep", "infinity"]
     }`), 0o600)
 	require.NoError(t, err, "write devcontainer.json")
 
@@ -2317,7 +2315,6 @@ func TestAgent_DevcontainerRecreate(t *testing.T) {
 		o.Devcontainers = true
 		o.DevcontainerAPIOptions = append(o.DevcontainerAPIOptions,
 			agentcontainers.WithContainerLabelIncludeFilter("devcontainer.local_folder", workspaceFolder),
-			agentcontainers.WithContainerLabelIncludeFilter(agentcontainers.DevcontainerIsTestRunLabel, "true"),
 		)
 	})
 
@@ -2372,7 +2369,7 @@ func TestAgent_DevcontainerRecreate(t *testing.T) {
 	// devcontainer, we do it in a goroutine so we can process logs
 	// concurrently.
 	go func(container codersdk.WorkspaceAgentContainer) {
-		_, err := conn.RecreateDevcontainer(ctx, devcontainerID.String())
+		_, err := conn.RecreateDevcontainer(ctx, container.ID)
 		assert.NoError(t, err, "recreate devcontainer should succeed")
 	}(container)
 
@@ -2441,8 +2438,7 @@ func TestAgent_DevcontainersDisabledForSubAgent(t *testing.T) {
 
 	// Setup the agent with devcontainers enabled initially.
 	//nolint:dogsled
-	conn, _, _, _, _ := setupAgent(t, manifest, 0, func(_ *agenttest.Client, o *agent.Options) {
-		o.Devcontainers = true
+	conn, _, _, _, _ := setupAgent(t, manifest, 0, func(*agenttest.Client, *agent.Options) {
 	})
 
 	// Query the containers API endpoint. This should fail because
@@ -2454,8 +2450,8 @@ func TestAgent_DevcontainersDisabledForSubAgent(t *testing.T) {
 	require.Error(t, err)
 
 	// Verify the error message contains the expected text.
-	require.Contains(t, err.Error(), "Dev Container feature not supported.")
-	require.Contains(t, err.Error(), "Dev Container integration inside other Dev Containers is explicitly not supported.")
+	require.Contains(t, err.Error(), "The agent dev containers feature is experimental and not enabled by default.")
+	require.Contains(t, err.Error(), "To enable this feature, set CODER_AGENT_DEVCONTAINERS_ENABLE=true in your template.")
 }
 
 func TestAgent_Dial(t *testing.T) {

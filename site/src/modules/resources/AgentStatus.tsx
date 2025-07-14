@@ -1,10 +1,7 @@
 import type { Interpolation, Theme } from "@emotion/react";
 import Link from "@mui/material/Link";
 import Tooltip from "@mui/material/Tooltip";
-import type {
-	WorkspaceAgent,
-	WorkspaceAgentDevcontainer,
-} from "api/typesGenerated";
+import type { WorkspaceAgent } from "api/typesGenerated";
 import { ChooseOne, Cond } from "components/Conditionals/ChooseOne";
 import {
 	HelpTooltip,
@@ -50,12 +47,6 @@ interface AgentStatusProps {
 }
 
 interface SubAgentStatusProps {
-	agent?: WorkspaceAgent;
-}
-
-interface DevcontainerStatusProps {
-	devcontainer: WorkspaceAgentDevcontainer;
-	parentAgent: WorkspaceAgent;
 	agent?: WorkspaceAgent;
 }
 
@@ -283,7 +274,7 @@ export const AgentStatus: FC<AgentStatusProps> = ({ agent }) => {
 	);
 };
 
-const SubAgentStatus: FC<SubAgentStatusProps> = ({ agent }) => {
+export const SubAgentStatus: FC<SubAgentStatusProps> = ({ agent }) => {
 	if (!agent) {
 		return <DisconnectedStatus />;
 	}
@@ -303,47 +294,6 @@ const SubAgentStatus: FC<SubAgentStatusProps> = ({ agent }) => {
 			</Cond>
 		</ChooseOne>
 	);
-};
-
-const DevcontainerStartError: FC<AgentStatusProps> = ({ agent }) => {
-	return (
-		<HelpTooltip>
-			<PopoverTrigger role="status" aria-label="Start error">
-				<TriangleAlertIcon css={styles.errorWarning} />
-			</PopoverTrigger>
-			<HelpTooltipContent>
-				<HelpTooltipTitle>
-					Error starting the devcontainer agent
-				</HelpTooltipTitle>
-				<HelpTooltipText>
-					Something went wrong during the devcontainer agent startup.{" "}
-					<Link
-						target="_blank"
-						rel="noreferrer"
-						href={agent.troubleshooting_url}
-					>
-						Troubleshoot
-					</Link>
-					.
-				</HelpTooltipText>
-			</HelpTooltipContent>
-		</HelpTooltip>
-	);
-};
-
-export const DevcontainerStatus: FC<DevcontainerStatusProps> = ({
-	devcontainer,
-	parentAgent,
-	agent,
-}) => {
-	if (devcontainer.error) {
-		// When a dev container has an 'error' associated with it,
-		// then we won't have an agent associated with it. This is
-		// why we use the parent agent instead of the sub agent.
-		return <DevcontainerStartError agent={parentAgent} />;
-	}
-
-	return <SubAgentStatus agent={agent} />;
 };
 
 const styles = {

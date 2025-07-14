@@ -70,8 +70,6 @@ func TestDynamicParametersOwnerSSHPublicKey(t *testing.T) {
 	require.Equal(t, sshKey.PublicKey, preview.Parameters[0].Value.Value)
 }
 
-// TestDynamicParametersWithTerraformValues is for testing the websocket flow of
-// dynamic parameters. No workspaces are created.
 func TestDynamicParametersWithTerraformValues(t *testing.T) {
 	t.Parallel()
 

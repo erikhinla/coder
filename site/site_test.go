@@ -27,6 +27,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/db2sdk"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/httpmw"
@@ -45,7 +46,7 @@ func TestInjection(t *testing.T) {
 		},
 	}
 	binFs := http.FS(fstest.MapFS{})
-	db, _ := dbtestutil.NewDB(t)
+	db := dbmem.New()
 	handler := site.New(&site.Options{
 		Telemetry: telemetry.NewNoop(),
 		BinFS:     binFs,
@@ -72,17 +73,13 @@ func TestInjection(t *testing.T) {
 	// This will update as part of the request!
 	got.LastSeenAt = user.LastSeenAt
 
-	// json.Unmarshal doesn't parse the timezone correctly
-	got.CreatedAt = got.CreatedAt.In(user.CreatedAt.Location())
-	got.UpdatedAt = got.UpdatedAt.In(user.CreatedAt.Location())
-
 	require.Equal(t, db2sdk.User(user, []uuid.UUID{}), got)
 }
 
 func TestInjectionFailureProducesCleanHTML(t *testing.T) {
 	t.Parallel()
 
-	db, _ := dbtestutil.NewDB(t)
+	db := dbmem.New()
 
 	// Create an expired user with a refresh token, but provide no OAuth2
 	// configuration so that refresh is impossible, this should result in

@@ -197,20 +197,16 @@ func (api *API) postTemplateByOrganization(rw http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Default is true until dynamic parameters are promoted to stable.
-	useClassicParameterFlow := ptr.NilToDefault(createTemplate.UseClassicParameterFlow, true)
-
 	// Make a temporary struct to represent the template. This is used for
 	// auditing if any of the following checks fail. It will be overwritten when
 	// the template is inserted into the db.
 	templateAudit.New = database.Template{
-		OrganizationID:          organization.ID,
-		Name:                    createTemplate.Name,
-		Description:             createTemplate.Description,
-		CreatedBy:               apiKey.UserID,
-		Icon:                    createTemplate.Icon,
-		DisplayName:             createTemplate.DisplayName,
-		UseClassicParameterFlow: useClassicParameterFlow,
+		OrganizationID: organization.ID,
+		Name:           createTemplate.Name,
+		Description:    createTemplate.Description,
+		CreatedBy:      apiKey.UserID,
+		Icon:           createTemplate.Icon,
+		DisplayName:    createTemplate.DisplayName,
 	}
 
 	_, err := api.Database.GetTemplateByOrganizationAndName(ctx, database.GetTemplateByOrganizationAndNameParams{
@@ -408,7 +404,6 @@ func (api *API) postTemplateByOrganization(rw http.ResponseWriter, r *http.Reque
 			Icon:                         createTemplate.Icon,
 			AllowUserCancelWorkspaceJobs: allowUserCancelWorkspaceJobs,
 			MaxPortSharingLevel:          maxPortShareLevel,
-			UseClassicParameterFlow:      useClassicParameterFlow,
 		})
 		if err != nil {
 			return xerrors.Errorf("insert template: %s", err)

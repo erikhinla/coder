@@ -306,10 +306,8 @@ module "vscode-web" {
 
 module "jetbrains" {
   count         = data.coder_workspace.me.start_count
-  source        = "dev.registry.coder.com/coder/jetbrains/coder"
-  version       = "1.0.0"
+  source        = "git::https://github.com/coder/registry.git//registry/coder/modules/jetbrains?ref=jetbrains"
   agent_id      = coder_agent.dev.id
-  agent_name    = "dev"
   folder        = local.repo_dir
   major_version = "latest"
 }
@@ -317,7 +315,7 @@ module "jetbrains" {
 module "filebrowser" {
   count      = data.coder_workspace.me.start_count
   source     = "dev.registry.coder.com/coder/filebrowser/coder"
-  version    = "1.1.1"
+  version    = "1.0.31"
   agent_id   = coder_agent.dev.id
   agent_name = "dev"
 }
@@ -339,7 +337,7 @@ module "cursor" {
 
 module "windsurf" {
   count    = data.coder_workspace.me.start_count
-  source   = "dev.registry.coder.com/coder/windsurf/coder"
+  source   = "registry.coder.com/coder/windsurf/coder"
   version  = "1.0.0"
   agent_id = coder_agent.dev.id
   folder   = local.repo_dir
@@ -347,8 +345,7 @@ module "windsurf" {
 
 module "zed" {
   count      = data.coder_workspace.me.start_count
-  source     = "dev.registry.coder.com/coder/zed/coder"
-  version    = "1.0.0"
+  source     = "./zed"
   agent_id   = coder_agent.dev.id
   agent_name = "dev"
   folder     = local.repo_dir
@@ -498,10 +495,6 @@ resource "coder_agent" "dev" {
   shutdown_script = <<-EOT
     #!/usr/bin/env bash
     set -eux -o pipefail
-
-    # Clean up the Go build cache to prevent the home volume from
-    # accumulating waste and growing too large.
-    go clean -cache
 
     # Clean up the unused resources to keep storage usage low.
     #

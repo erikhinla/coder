@@ -1,6 +1,4 @@
 import { MissingBuildParameters } from "api/api";
-import { isApiError } from "api/errors";
-import { type ApiError, getErrorMessage } from "api/errors";
 import {
 	changeVersion,
 	deleteWorkspace,
@@ -15,7 +13,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "components/DropdownMenu/DropdownMenu";
-import { displayError } from "components/GlobalSnackbar/utils";
 import {
 	CopyIcon,
 	DownloadIcon,
@@ -27,7 +24,6 @@ import {
 import { type FC, useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { Link as RouterLink } from "react-router-dom";
-import { WorkspaceErrorDialog } from "../ErrorDialog/WorkspaceErrorDialog";
 import { ChangeWorkspaceVersionDialog } from "./ChangeWorkspaceVersionDialog";
 import { DownloadLogsDialog } from "./DownloadLogsDialog";
 import { UpdateBuildParametersDialog } from "./UpdateBuildParametersDialog";
@@ -46,11 +42,6 @@ export const WorkspaceMoreActions: FC<WorkspaceMoreActionsProps> = ({
 }) => {
 	const queryClient = useQueryClient();
 
-	const [workspaceErrorDialog, setWorkspaceErrorDialog] = useState<{
-		open: boolean;
-		error?: ApiError;
-	}>({ open: false });
-
 	// Permissions
 	const { data: permissions } = useQuery(workspacePermissions(workspace));
 
@@ -67,25 +58,11 @@ export const WorkspaceMoreActions: FC<WorkspaceMoreActionsProps> = ({
 		),
 	);
 
-	const handleError = (error: unknown) => {
-		if (isApiError(error) && error.code === "ERR_BAD_REQUEST") {
-			setWorkspaceErrorDialog({
-				open: true,
-				error: error,
-			});
-		} else {
-			displayError(getErrorMessage(error, "Failed to delete workspace."));
-		}
-	};
-
 	// Delete
 	const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
-	const deleteWorkspaceMutation = useMutation({
-		...deleteWorkspace(workspace, queryClient),
-		onError: (error: unknown) => {
-			handleError(error);
-		},
-	});
+	const deleteWorkspaceMutation = useMutation(
+		deleteWorkspace(workspace, queryClient),
+	);
 
 	// Duplicate
 	const { duplicateWorkspace, isDuplicationReady } =
@@ -234,17 +211,6 @@ export const WorkspaceMoreActions: FC<WorkspaceMoreActionsProps> = ({
 					deleteWorkspaceMutation.mutate({ orphan });
 					setIsConfirmingDelete(false);
 				}}
-			/>
-
-			<WorkspaceErrorDialog
-				open={workspaceErrorDialog.open}
-				error={workspaceErrorDialog.error}
-				onClose={() => setWorkspaceErrorDialog({ open: false })}
-				showDetail={workspace.template_use_classic_parameter_flow}
-				workspaceOwner={workspace.owner_name}
-				workspaceName={workspace.name}
-				templateVersionId={workspace.latest_build.template_version_id}
-				isDeleting={true}
 			/>
 		</>
 	);

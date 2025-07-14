@@ -20,7 +20,6 @@ import { displayError } from "components/GlobalSnackbar/utils";
 import { useWorkspaceBuildLogs } from "hooks/useWorkspaceBuildLogs";
 import { EphemeralParametersDialog } from "modules/workspaces/EphemeralParametersDialog/EphemeralParametersDialog";
 import { WorkspaceErrorDialog } from "modules/workspaces/ErrorDialog/WorkspaceErrorDialog";
-import { WorkspaceBuildCancelDialog } from "modules/workspaces/WorkspaceBuildCancelDialog/WorkspaceBuildCancelDialog";
 import {
 	WorkspaceUpdateDialogs,
 	useWorkspaceUpdate,
@@ -80,8 +79,6 @@ export const WorkspaceReadyPage: FC<WorkspaceReadyPageProps> = ({
 		buildParameters?: TypesGen.WorkspaceBuildParameter[];
 		ephemeralParameters: TypesGen.TemplateVersionParameter[];
 	}>({ open: false, action: "start", ephemeralParameters: [] });
-
-	const [isCancelConfirmOpen, setIsCancelConfirmOpen] = useState(false);
 
 	const { mutate: mutateRestartWorkspace, isPending: isRestarting } =
 		useMutation({
@@ -319,7 +316,7 @@ export const WorkspaceReadyPage: FC<WorkspaceReadyPageProps> = ({
 					}
 				}}
 				handleUpdate={workspaceUpdate.update}
-				handleCancel={() => setIsCancelConfirmOpen(true)}
+				handleCancel={cancelBuildMutation.mutate}
 				handleRetry={handleRetry}
 				handleDebug={handleDebug}
 				handleDormantActivate={async () => {
@@ -353,16 +350,6 @@ export const WorkspaceReadyPage: FC<WorkspaceReadyPageProps> = ({
 						<strong>delete non-persistent data</strong>.
 					</>
 				}
-			/>
-
-			<WorkspaceBuildCancelDialog
-				open={isCancelConfirmOpen}
-				onClose={() => setIsCancelConfirmOpen(false)}
-				onConfirm={() => {
-					cancelBuildMutation.mutate();
-					setIsCancelConfirmOpen(false);
-				}}
-				workspace={workspace}
 			/>
 
 			<EphemeralParametersDialog
@@ -405,7 +392,6 @@ export const WorkspaceReadyPage: FC<WorkspaceReadyPageProps> = ({
 				workspaceOwner={workspace.owner_name}
 				workspaceName={workspace.name}
 				templateVersionId={workspace.latest_build.template_version_id}
-				isDeleting={false}
 			/>
 		</>
 	);

@@ -1,11 +1,9 @@
 import { appearance } from "api/queries/appearance";
-import { buildInfo } from "api/queries/buildInfo";
 import { entitlements } from "api/queries/entitlements";
 import { experiments } from "api/queries/experiments";
 import { organizations } from "api/queries/organizations";
 import type {
 	AppearanceConfig,
-	BuildInfoResponse,
 	Entitlements,
 	Experiment,
 	Organization,
@@ -23,7 +21,6 @@ export interface DashboardValue {
 	entitlements: Entitlements;
 	experiments: Experiment[];
 	appearance: AppearanceConfig;
-	buildInfo: BuildInfoResponse;
 	organizations: readonly Organization[];
 	showOrganizations: boolean;
 	canViewOrganizationSettings: boolean;
@@ -39,14 +36,12 @@ export const DashboardProvider: FC<PropsWithChildren> = ({ children }) => {
 	const entitlementsQuery = useQuery(entitlements(metadata.entitlements));
 	const experimentsQuery = useQuery(experiments(metadata.experiments));
 	const appearanceQuery = useQuery(appearance(metadata.appearance));
-	const buildInfoQuery = useQuery(buildInfo(metadata["build-info"]));
 	const organizationsQuery = useQuery(organizations());
 
 	const error =
 		entitlementsQuery.error ||
 		appearanceQuery.error ||
 		experimentsQuery.error ||
-		buildInfoQuery.error ||
 		organizationsQuery.error;
 
 	if (error) {
@@ -57,7 +52,6 @@ export const DashboardProvider: FC<PropsWithChildren> = ({ children }) => {
 		!entitlementsQuery.data ||
 		!appearanceQuery.data ||
 		!experimentsQuery.data ||
-		!buildInfoQuery.data ||
 		!organizationsQuery.data;
 
 	if (isLoading) {
@@ -76,7 +70,6 @@ export const DashboardProvider: FC<PropsWithChildren> = ({ children }) => {
 				entitlements: entitlementsQuery.data,
 				experiments: experimentsQuery.data,
 				appearance: appearanceQuery.data,
-				buildInfo: buildInfoQuery.data,
 				organizations: organizationsQuery.data,
 				showOrganizations,
 				canViewOrganizationSettings:

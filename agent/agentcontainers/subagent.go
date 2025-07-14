@@ -188,7 +188,7 @@ func (a *subAgentAPIClient) List(ctx context.Context) ([]SubAgent, error) {
 	return agents, nil
 }
 
-func (a *subAgentAPIClient) Create(ctx context.Context, agent SubAgent) (_ SubAgent, err error) {
+func (a *subAgentAPIClient) Create(ctx context.Context, agent SubAgent) (SubAgent, error) {
 	a.logger.Debug(ctx, "creating sub agent", slog.F("name", agent.Name), slog.F("directory", agent.Directory))
 
 	displayApps := make([]agentproto.CreateSubAgentRequest_DisplayApp, 0, len(agent.DisplayApps))
@@ -233,27 +233,19 @@ func (a *subAgentAPIClient) Create(ctx context.Context, agent SubAgent) (_ SubAg
 	if err != nil {
 		return SubAgent{}, err
 	}
-	defer func() {
-		if err != nil {
-			// Best effort.
-			_, _ = a.api.DeleteSubAgent(ctx, &agentproto.DeleteSubAgentRequest{
-				Id: resp.GetAgent().GetId(),
-			})
-		}
-	}()
 
-	agent.Name = resp.GetAgent().GetName()
-	agent.ID, err = uuid.FromBytes(resp.GetAgent().GetId())
+	agent.Name = resp.Agent.Name
+	agent.ID, err = uuid.FromBytes(resp.Agent.Id)
 	if err != nil {
-		return SubAgent{}, err
+		return agent, err
 	}
-	agent.AuthToken, err = uuid.FromBytes(resp.GetAgent().GetAuthToken())
+	agent.AuthToken, err = uuid.FromBytes(resp.Agent.AuthToken)
 	if err != nil {
-		return SubAgent{}, err
+		return agent, err
 	}
 
-	for _, appError := range resp.GetAppCreationErrors() {
-		app := apps[appError.GetIndex()]
+	for _, appError := range resp.AppCreationErrors {
+		app := apps[appError.Index]
 
 		a.logger.Warn(ctx, "unable to create app",
 			slog.F("agent_name", agent.Name),

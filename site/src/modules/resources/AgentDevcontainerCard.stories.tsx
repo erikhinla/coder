@@ -46,16 +46,6 @@ const meta: Meta<typeof AgentDevcontainerCard> = {
 export default meta;
 type Story = StoryObj<typeof AgentDevcontainerCard>;
 
-export const HasError: Story = {
-	args: {
-		devcontainer: {
-			...MockWorkspaceAgentDevcontainer,
-			error: "unable to inject devcontainer with agent",
-			agent: undefined,
-		},
-	},
-};
-
 export const NoPorts: Story = {};
 
 export const WithPorts: Story = {

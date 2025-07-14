@@ -35,7 +35,6 @@ module.exports = {
 				}),
 			);
 		}
-		config.server.allowedHosts = [".coder"];
 		return config;
 	},
 };

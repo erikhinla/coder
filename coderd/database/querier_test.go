@@ -1400,6 +1400,7 @@ func TestGetUsers_IncludeSystem(t *testing.T) {
 
 			// Given: a system user
 			// postgres: introduced by migration coderd/database/migrations/00030*_system_user.up.sql
+			// dbmem: created in dbmem/dbmem.go
 			db, _ := dbtestutil.NewDB(t)
 			other := dbgen.User(t, db, database.User{})
 			users, err := db.GetUsers(ctx, database.GetUsersParams{
@@ -1564,26 +1565,6 @@ func TestAuditLogDefaultLimit(t *testing.T) {
 	// The length should match the default limit of the SQL query.
 	// Updating the sql query requires changing the number below to match.
 	require.Len(t, rows, 100)
-}
-
-func TestAuditLogCount(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.SkipNow()
-	}
-
-	sqlDB := testSQLDB(t)
-	err := migrations.Up(sqlDB)
-	require.NoError(t, err)
-	db := database.New(sqlDB)
-
-	ctx := testutil.Context(t, testutil.WaitLong)
-
-	dbgen.AuditLog(t, db, database.AuditLog{})
-
-	count, err := db.CountAuditLogs(ctx, database.CountAuditLogsParams{})
-	require.NoError(t, err)
-	require.Equal(t, int64(1), count)
 }
 
 func TestWorkspaceQuotas(t *testing.T) {
@@ -1966,13 +1947,9 @@ func TestAuthorizedAuditLogs(t *testing.T) {
 		})
 
 		// When: The user queries for audit logs
-		count, err := db.CountAuditLogs(memberCtx, database.CountAuditLogsParams{})
-		require.NoError(t, err)
 		logs, err := db.GetAuditLogsOffset(memberCtx, database.GetAuditLogsOffsetParams{})
 		require.NoError(t, err)
-
-		// Then: No logs returned and count is 0
-		require.Equal(t, int64(0), count, "count should be 0")
+		// Then: No logs returned
 		require.Len(t, logs, 0, "no logs should be returned")
 	})
 
@@ -1988,14 +1965,10 @@ func TestAuthorizedAuditLogs(t *testing.T) {
 		})
 
 		// When: the auditor queries for audit logs
-		count, err := db.CountAuditLogs(siteAuditorCtx, database.CountAuditLogsParams{})
-		require.NoError(t, err)
 		logs, err := db.GetAuditLogsOffset(siteAuditorCtx, database.GetAuditLogsOffsetParams{})
 		require.NoError(t, err)
-
-		// Then: All logs are returned and count matches
-		require.Equal(t, int64(len(allLogs)), count, "count should match total number of logs")
-		require.ElementsMatch(t, auditOnlyIDs(allLogs), auditOnlyIDs(logs), "all logs should be returned")
+		// Then: All logs are returned
+		require.ElementsMatch(t, auditOnlyIDs(allLogs), auditOnlyIDs(logs))
 	})
 
 	t.Run("SingleOrgAuditor", func(t *testing.T) {
@@ -2011,14 +1984,10 @@ func TestAuthorizedAuditLogs(t *testing.T) {
 		})
 
 		// When: The auditor queries for audit logs
-		count, err := db.CountAuditLogs(orgAuditCtx, database.CountAuditLogsParams{})
-		require.NoError(t, err)
 		logs, err := db.GetAuditLogsOffset(orgAuditCtx, database.GetAuditLogsOffsetParams{})
 		require.NoError(t, err)
-
-		// Then: Only the logs for the organization are returned and count matches
-		require.Equal(t, int64(len(orgAuditLogs[orgID])), count, "count should match organization logs")
-		require.ElementsMatch(t, orgAuditLogs[orgID], auditOnlyIDs(logs), "only organization logs should be returned")
+		// Then: Only the logs for the organization are returned
+		require.ElementsMatch(t, orgAuditLogs[orgID], auditOnlyIDs(logs))
 	})
 
 	t.Run("TwoOrgAuditors", func(t *testing.T) {
@@ -2035,16 +2004,10 @@ func TestAuthorizedAuditLogs(t *testing.T) {
 		})
 
 		// When: The user queries for audit logs
-		count, err := db.CountAuditLogs(multiOrgAuditCtx, database.CountAuditLogsParams{})
-		require.NoError(t, err)
 		logs, err := db.GetAuditLogsOffset(multiOrgAuditCtx, database.GetAuditLogsOffsetParams{})
 		require.NoError(t, err)
-
-		// Then: All logs for both organizations are returned and count matches
-		expectedLogs := append([]uuid.UUID{}, orgAuditLogs[first]...)
-		expectedLogs = append(expectedLogs, orgAuditLogs[second]...)
-		require.Equal(t, int64(len(expectedLogs)), count, "count should match sum of both organizations")
-		require.ElementsMatch(t, expectedLogs, auditOnlyIDs(logs), "logs from both organizations should be returned")
+		// Then: All logs for both organizations are returned
+		require.ElementsMatch(t, append(orgAuditLogs[first], orgAuditLogs[second]...), auditOnlyIDs(logs))
 	})
 
 	t.Run("ErroneousOrg", func(t *testing.T) {
@@ -2059,13 +2022,9 @@ func TestAuthorizedAuditLogs(t *testing.T) {
 		})
 
 		// When: The user queries for audit logs
-		count, err := db.CountAuditLogs(userCtx, database.CountAuditLogsParams{})
-		require.NoError(t, err)
 		logs, err := db.GetAuditLogsOffset(userCtx, database.GetAuditLogsOffsetParams{})
 		require.NoError(t, err)
-
-		// Then: No logs are returned and count is 0
-		require.Equal(t, int64(0), count, "count should be 0")
+		// Then: No logs are returned
 		require.Len(t, logs, 0, "no logs should be returned")
 	})
 }

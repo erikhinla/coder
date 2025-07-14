@@ -44,18 +44,18 @@ on the internet that explain sensible configurations for this chart. Example:
 ```console
 # Install PostgreSQL
 helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install postgresql bitnami/postgresql \
+helm install coder-db bitnami/postgresql \
     --namespace coder \
     --set auth.username=coder \
     --set auth.password=coder \
     --set auth.database=coder \
-    --set primary.persistence.size=10Gi
+    --set persistence.size=10Gi
 ```
 
 The cluster-internal DB URL for the above database is:
 
 ```shell
-postgres://coder:coder@postgresql.coder.svc.cluster.local:5432/coder?sslmode=disable
+postgres://coder:coder@coder-db-postgresql.coder.svc.cluster.local:5432/coder?sslmode=disable
 ```
 
 You can optionally use the
@@ -69,7 +69,7 @@ self-managed PostgreSQL, the address will be:
 
 ```sh
 kubectl create secret generic coder-db-url -n coder \
-  --from-literal=url="postgres://coder:coder@postgresql.coder.svc.cluster.local:5432/coder?sslmode=disable"
+  --from-literal=url="postgres://coder:coder@coder-db-postgresql.coder.svc.cluster.local:5432/coder?sslmode=disable"
 ```
 
 ## 4. Install Coder with Helm
@@ -117,7 +117,7 @@ coder:
 ```
 
 You can view our
-[Helm README](https://github.com/coder/coder/blob/main/helm/coder#readme) for
+[Helm README](https://github.com/coder/coder/blob/main/helm#readme) for
 details on the values that are available, or you can view the
 [values.yaml](https://github.com/coder/coder/blob/main/helm/coder/values.yaml)
 file directly.
@@ -127,51 +127,25 @@ We support two release channels: mainline and stable - read the
 
 - **Mainline** Coder release:
 
-  - **Chart Registry**
+  <!-- autoversion(mainline): "--version [version]" -->
 
-    <!-- autoversion(mainline): "--version [version]" -->
-
-    ```shell
-    helm install coder coder-v2/coder \
-        --namespace coder \
-        --values values.yaml \
-        --version 2.23.1
-    ```
-  
-  - **OCI Registry**
-
-    <!-- autoversion(mainline): "--version [version]" -->
-
-    ```shell
-    helm install coder oci://ghcr.io/coder/chart/coder \
-        --namespace coder \
-        --values values.yaml \
-        --version 2.23.1
-    ```
+  ```shell
+  helm install coder coder-v2/coder \
+      --namespace coder \
+      --values values.yaml \
+      --version 2.23.1
+  ```
 
 - **Stable** Coder release:
 
-  - **Chart Registry**
+  <!-- autoversion(stable): "--version [version]" -->
 
-    <!-- autoversion(stable): "--version [version]" -->
-
-    ```shell
-    helm install coder coder-v2/coder \
-        --namespace coder \
-        --values values.yaml \
-        --version 2.22.1
-    ```
-  
-  - **OCI Registry**
-
-    <!-- autoversion(stable): "--version [version]" -->
-
-    ```shell
-    helm install coder oci://ghcr.io/coder/chart/coder \
-        --namespace coder \
-        --values values.yaml \
-        --version 2.22.1
-    ```
+  ```shell
+  helm install coder coder-v2/coder \
+      --namespace coder \
+      --values values.yaml \
+      --version 2.22.1
+  ```
 
 You can watch Coder start up by running `kubectl get pods -n coder`. Once Coder
 has started, the `coder-*` pods should enter the `Running` state.

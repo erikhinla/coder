@@ -1,25 +1,21 @@
 # Coder Development Guidelines
 
-@.claude/docs/WORKFLOWS.md
-@.cursorrules
-@README.md
-@package.json
+Read [cursor rules](.cursorrules).
 
-## 🚀 Essential Commands
+## Build/Test/Lint Commands
 
-| Task              | Command                  | Notes                            |
-|-------------------|--------------------------|----------------------------------|
-| **Development**   | `./scripts/develop.sh`   | ⚠️ Don't use manual build        |
-| **Build**         | `make build`             | Fat binaries (includes server)   |
-| **Build Slim**    | `make build-slim`        | Slim binaries                    |
-| **Test**          | `make test`              | Full test suite                  |
-| **Test Single**   | `make test RUN=TestName` | Faster than full suite           |
-| **Test Postgres** | `make test-postgres`     | Run tests with Postgres database |
-| **Test Race**     | `make test-race`         | Run tests with Go race detector  |
-| **Lint**          | `make lint`              | Always run after changes         |
-| **Generate**      | `make gen`               | After database changes           |
-| **Format**        | `make fmt`               | Auto-format code                 |
-| **Clean**         | `make clean`             | Clean build artifacts            |
+### Main Commands
+
+- `make build` or `make build-fat` - Build all "fat" binaries (includes "server" functionality)
+- `make build-slim` - Build "slim" binaries
+- `make test` - Run Go tests
+- `make test RUN=TestFunctionName` or `go test -v ./path/to/package -run TestFunctionName` - Test single
+- `make test-postgres` - Run tests with Postgres database
+- `make test-race` - Run tests with Go race detector
+- `make test-e2e` - Run end-to-end tests
+- `make lint` - Run all linters
+- `make fmt` - Format all code
+- `make gen` - Generates mocks, database queries and other auto-generated files
 
 ### Frontend Commands (site directory)
 
@@ -30,94 +26,81 @@
 - `pnpm lint` - Lint frontend code
 - `pnpm test` - Run frontend tests
 
-### Documentation Commands
+## Code Style Guidelines
 
-- `pnpm run format-docs` - Format markdown tables in docs
-- `pnpm run lint-docs` - Lint and fix markdown files
-- `pnpm run storybook` - Run Storybook (from site directory)
+### Go
 
-## 🔧 Critical Patterns
+- Follow [Effective Go](https://go.dev/doc/effective_go) and [Go's Code Review Comments](https://github.com/golang/go/wiki/CodeReviewComments)
+- Use `gofumpt` for formatting
+- Create packages when used during implementation
+- Validate abstractions against implementations
 
-### Database Changes (ALWAYS FOLLOW)
+### Error Handling
 
-1. Modify `coderd/database/queries/*.sql` files
-2. Run `make gen`
-3. If audit errors: update `enterprise/audit/table.go`
-4. Run `make gen` again
+- Use descriptive error messages
+- Wrap errors with context
+- Propagate errors appropriately
+- Use proper error types
+- (`xerrors.Errorf("failed to X: %w", err)`)
 
-### LSP Navigation (USE FIRST)
+### Naming
 
-- **Find definitions**: `mcp__go-language-server__definition symbolName`
-- **Find references**: `mcp__go-language-server__references symbolName`
-- **Get type info**: `mcp__go-language-server__hover filePath line column`
+- Use clear, descriptive names
+- Abbreviate only when obvious
+- Follow Go and TypeScript naming conventions
 
-### OAuth2 Error Handling
+### Comments
 
-```go
-// OAuth2-compliant error responses
-writeOAuth2Error(ctx, rw, http.StatusBadRequest, "invalid_grant", "description")
-```
+- Document exported functions, types, and non-obvious logic
+- Follow JSDoc format for TypeScript
+- Use godoc format for Go code
 
-### Authorization Context
+## Commit Style
 
-```go
-// Public endpoints needing system access
-app, err := api.Database.GetOAuth2ProviderAppByClientID(dbauthz.AsSystemRestricted(ctx), clientID)
+- Follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/)
+- Format: `type(scope): message`
+- Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
+- Keep message titles concise (~70 characters)
+- Use imperative, present tense in commit titles
 
-// Authenticated endpoints with user context
-app, err := api.Database.GetOAuth2ProviderAppByClientID(ctx, clientID)
-```
+## Database queries
 
-## 📋 Quick Reference
+- MUST DO! Any changes to database - adding queries, modifying queries should be done in the  `coderd\database\queries\*.sql` files. Use `make gen` to generate necessary changes after.
+- MUST DO! Queries are grouped in files relating to context - e.g. `prebuilds.sql`, `users.sql`, `provisionerjobs.sql`.
+- After making changes to any `coderd\database\queries\*.sql` files you must run `make gen` to generate respective ORM changes.
 
-### Full workflows available in imported WORKFLOWS.md
+## Architecture
 
-### New Feature Checklist
+### Core Components
 
-- [ ] Run `git pull` to ensure latest code
-- [ ] Check if feature touches database - you'll need migrations
-- [ ] Check if feature touches audit logs - update `enterprise/audit/table.go`
+- **coderd**: Main API service connecting workspaces, provisioners, and users
+- **provisionerd**: Execution context for infrastructure-modifying providers
+- **Agents**: Services in remote workspaces providing features like SSH and port forwarding
+- **Workspaces**: Cloud resources defined by Terraform
 
-## 🏗️ Architecture
+## Sub-modules
 
-- **coderd**: Main API service
-- **provisionerd**: Infrastructure provisioning
-- **Agents**: Workspace services (SSH, port forwarding)
-- **Database**: PostgreSQL with `dbauthz` authorization
+### Template System
 
-## 🧪 Testing
+- Templates define infrastructure for workspaces using Terraform
+- Environment variables pass context between Coder and templates
+- Official modules extend development environments
 
-### Race Condition Prevention
+### RBAC System
 
-- Use unique identifiers: `fmt.Sprintf("test-client-%s-%d", t.Name(), time.Now().UnixNano())`
-- Never use hardcoded names in concurrent tests
+- Permissions defined at site, organization, and user levels
+- Object-Action model protects resources
+- Built-in roles: owner, member, auditor, templateAdmin
+- Permission format: `<sign>?<level>.<object>.<id>.<action>`
 
-### OAuth2 Testing
+### Database
 
-- Full suite: `./scripts/oauth2/test-mcp-oauth2.sh`
-- Manual testing: `./scripts/oauth2/test-manual-flow.sh`
+- PostgreSQL 13+ recommended for production
+- Migrations managed with `migrate`
+- Database authorization through `dbauthz` package
 
-## 🎯 Code Style
+## Frontend
 
-### Detailed guidelines in imported WORKFLOWS.md
+The frontend is contained in the site folder.
 
-- Follow [Uber Go Style Guide](https://github.com/uber-go/guide/blob/master/style.md)
-- Commit format: `type(scope): message`
-
-## 📚 Detailed Development Guides
-
-@.claude/docs/OAUTH2.md
-@.claude/docs/TESTING.md
-@.claude/docs/TROUBLESHOOTING.md
-@.claude/docs/DATABASE.md
-
-## 🚨 Common Pitfalls
-
-1. **Audit table errors** → Update `enterprise/audit/table.go`
-2. **OAuth2 errors** → Return RFC-compliant format
-3. **Race conditions** → Use unique test identifiers
-4. **Missing newlines** → Ensure files end with newline
-
----
-
-*This file stays lean and actionable. Detailed workflows and explanations are imported automatically.*
+For building Frontend refer to [this document](docs/about/contributing/frontend.md)

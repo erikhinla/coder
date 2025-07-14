@@ -113,8 +113,6 @@ func ResourceTarget[T Auditable](tgt T) string {
 		return "" // no target?
 	case database.NotificationsSettings:
 		return "" // no target?
-	case database.PrebuildsSettings:
-		return "" // no target?
 	case database.OAuth2ProviderApp:
 		return typed.Name
 	case database.OAuth2ProviderAppSecret:
@@ -178,9 +176,6 @@ func ResourceID[T Auditable](tgt T) uuid.UUID {
 	case database.NotificationsSettings:
 		// Artificial ID for auditing purposes
 		return typed.ID
-	case database.PrebuildsSettings:
-		// Artificial ID for auditing purposes
-		return typed.ID
 	case database.OAuth2ProviderApp:
 		return typed.ID
 	case database.OAuth2ProviderAppSecret:
@@ -236,8 +231,6 @@ func ResourceType[T Auditable](tgt T) database.ResourceType {
 		return database.ResourceTypeHealthSettings
 	case database.NotificationsSettings:
 		return database.ResourceTypeNotificationsSettings
-	case database.PrebuildsSettings:
-		return database.ResourceTypePrebuildsSettings
 	case database.OAuth2ProviderApp:
 		return database.ResourceTypeOauth2ProviderApp
 	case database.OAuth2ProviderAppSecret:
@@ -293,9 +286,6 @@ func ResourceRequiresOrgID[T Auditable]() bool {
 		// Artificial ID for auditing purposes
 		return false
 	case database.NotificationsSettings:
-		// Artificial ID for auditing purposes
-		return false
-	case database.PrebuildsSettings:
 		// Artificial ID for auditing purposes
 		return false
 	case database.OAuth2ProviderApp:

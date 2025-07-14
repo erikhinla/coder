@@ -100,11 +100,9 @@ readinessProbe:
     path: /healthz
     port: "http"
     scheme: "HTTP"
-  initialDelaySeconds: {{ .Values.coder.readinessProbe.initialDelaySeconds }}
 livenessProbe:
   httpGet:
     path: /healthz
     port: "http"
     scheme: "HTTP"
-  initialDelaySeconds: {{ .Values.coder.livenessProbe.initialDelaySeconds }}
 {{- end }}

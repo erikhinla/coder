@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/coder/coder/v2/coderd/database"
-	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/enterprise/coderd/coderdenttest"
@@ -30,7 +30,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Defaults", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		entitlements, err := license.Entitlements(context.Background(), db, 1, 1, coderdenttest.Keys, all)
 		require.NoError(t, err)
 		require.False(t, entitlements.HasLicense)
@@ -42,7 +42,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("Always return the current user count", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		entitlements, err := license.Entitlements(context.Background(), db, 1, 1, coderdenttest.Keys, all)
 		require.NoError(t, err)
 		require.False(t, entitlements.HasLicense)
@@ -51,7 +51,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("SingleLicenseNothing", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{}),
 			Exp: dbtime.Now().Add(time.Hour),
@@ -67,7 +67,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("SingleLicenseAll", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: func() license.Features {
@@ -90,7 +90,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("SingleLicenseGrace", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -116,7 +116,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("Expiration warning", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -145,7 +145,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Expiration warning for license expiring in 1 day", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -174,7 +174,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Expiration warning for trials", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -204,7 +204,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Expiration warning for non trials", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -233,7 +233,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("SingleLicenseNotEntitled", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{}),
 			Exp: time.Now().Add(time.Hour),
@@ -261,13 +261,11 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("TooManyUsers", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		activeUser1, err := db.InsertUser(context.Background(), database.InsertUserParams{
 			ID:        uuid.New(),
 			Username:  "test1",
-			Email:     "test1@coder.com",
 			LoginType: database.LoginTypePassword,
-			RBACRoles: []string{},
 		})
 		require.NoError(t, err)
 		_, err = db.UpdateUserStatus(context.Background(), database.UpdateUserStatusParams{
@@ -279,9 +277,7 @@ func TestEntitlements(t *testing.T) {
 		activeUser2, err := db.InsertUser(context.Background(), database.InsertUserParams{
 			ID:        uuid.New(),
 			Username:  "test2",
-			Email:     "test2@coder.com",
 			LoginType: database.LoginTypePassword,
-			RBACRoles: []string{},
 		})
 		require.NoError(t, err)
 		_, err = db.UpdateUserStatus(context.Background(), database.UpdateUserStatusParams{
@@ -293,9 +289,7 @@ func TestEntitlements(t *testing.T) {
 		_, err = db.InsertUser(context.Background(), database.InsertUserParams{
 			ID:        uuid.New(),
 			Username:  "dormant-user",
-			Email:     "dormant-user@coder.com",
 			LoginType: database.LoginTypePassword,
-			RBACRoles: []string{},
 		})
 		require.NoError(t, err)
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
@@ -313,7 +307,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("MaximizeUserLimit", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertUser(context.Background(), database.InsertUserParams{})
 		db.InsertUser(context.Background(), database.InsertUserParams{})
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
@@ -341,7 +335,7 @@ func TestEntitlements(t *testing.T) {
 	})
 	t.Run("MultipleLicenseEnabled", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		// One trial
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
@@ -365,7 +359,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Enterprise", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		_, err := db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -396,7 +390,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("Premium", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		_, err := db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -427,7 +421,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("SetNone", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		_, err := db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -449,7 +443,7 @@ func TestEntitlements(t *testing.T) {
 	// AllFeatures uses the deprecated 'AllFeatures' boolean.
 	t.Run("AllFeatures", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -479,7 +473,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("AllFeaturesAlwaysEnable", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: dbtime.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -510,7 +504,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("AllFeaturesGrace", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: dbtime.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -541,7 +535,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleReplicasNoLicense", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		entitlements, err := license.Entitlements(context.Background(), db, 2, 1, coderdenttest.Keys, all)
 		require.NoError(t, err)
 		require.False(t, entitlements.HasLicense)
@@ -551,7 +545,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleReplicasNotEntitled", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -571,7 +565,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleReplicasGrace", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				Features: license.Features{
@@ -593,7 +587,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleGitAuthNoLicense", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		entitlements, err := license.Entitlements(context.Background(), db, 1, 2, coderdenttest.Keys, all)
 		require.NoError(t, err)
 		require.False(t, entitlements.HasLicense)
@@ -603,7 +597,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleGitAuthNotEntitled", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			Exp: time.Now().Add(time.Hour),
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
@@ -623,7 +617,7 @@ func TestEntitlements(t *testing.T) {
 
 	t.Run("MultipleGitAuthGrace", func(t *testing.T) {
 		t.Parallel()
-		db, _ := dbtestutil.NewDB(t)
+		db := dbmem.New()
 		db.InsertLicense(context.Background(), database.InsertLicenseParams{
 			JWT: coderdenttest.GenerateLicense(t, coderdenttest.LicenseOptions{
 				GraceAt:   time.Now().Add(-time.Hour),

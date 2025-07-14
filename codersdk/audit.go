@@ -26,7 +26,6 @@ const (
 	ResourceTypeConvertLogin          ResourceType = "convert_login"
 	ResourceTypeHealthSettings        ResourceType = "health_settings"
 	ResourceTypeNotificationsSettings ResourceType = "notifications_settings"
-	ResourceTypePrebuildsSettings     ResourceType = "prebuilds_settings"
 	ResourceTypeWorkspaceProxy        ResourceType = "workspace_proxy"
 	ResourceTypeOrganization          ResourceType = "organization"
 	ResourceTypeOAuth2ProviderApp     ResourceType = "oauth2_provider_app"
@@ -74,8 +73,6 @@ func (r ResourceType) FriendlyString() string {
 		return "health_settings"
 	case ResourceTypeNotificationsSettings:
 		return "notifications_settings"
-	case ResourceTypePrebuildsSettings:
-		return "prebuilds_settings"
 	case ResourceTypeOAuth2ProviderApp:
 		return "oauth2 app"
 	case ResourceTypeOAuth2ProviderAppSecret:

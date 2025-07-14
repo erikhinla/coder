@@ -16,8 +16,10 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/database/pubsub"
 	"github.com/coder/coder/v2/enterprise/replicasync"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -213,7 +215,11 @@ func TestReplica(t *testing.T) {
 		t.Parallel()
 		ctx, cancelCtx := context.WithCancel(context.Background())
 		defer cancelCtx()
-		db, pubsub := dbtestutil.NewDB(t)
+		// This doesn't use the database fake because creating
+		// this many PostgreSQL connections takes some
+		// configuration tweaking.
+		db := dbmem.New()
+		pubsub := pubsub.NewInMemory()
 		logger := testutil.Logger(t)
 		dh := &derpyHandler{}
 		defer dh.requireOnlyDERPPaths(t)

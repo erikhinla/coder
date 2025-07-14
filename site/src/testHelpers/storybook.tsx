@@ -18,7 +18,6 @@ import type { FC } from "react";
 import { useQueryClient } from "react-query";
 import {
 	MockAppearanceConfig,
-	MockBuildInfo,
 	MockDefaultOrganization,
 	MockDeploymentConfig,
 	MockEntitlements,
@@ -57,10 +56,6 @@ export const withDashboardProvider = (
 				entitlements,
 				experiments,
 				appearance: MockAppearanceConfig,
-				buildInfo: {
-					...MockBuildInfo,
-					version: "v0.0.0-test",
-				},
 				organizations,
 				showOrganizations,
 				canViewOrganizationSettings,

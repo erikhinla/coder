@@ -72,7 +72,7 @@ export default defineConfig({
 			"--global-config $(mktemp -d -t e2e-XXXXXXXXXX)",
 			`--access-url=http://localhost:${coderPort}`,
 			`--http-address=0.0.0.0:${coderPort}`,
-			"--ephemeral",
+			"--in-memory",
 			"--telemetry=false",
 			"--dangerous-disable-rate-limits",
 			"--provisioner-daemons 10",

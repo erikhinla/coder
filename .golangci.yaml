@@ -181,6 +181,7 @@ linters-settings:
 
 issues:
   exclude-dirs:
+    - coderd/database/dbmem
     - node_modules
     - .git
 

@@ -8,7 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/coder/coder/v2/coderd/database/dbtestutil"
+	"github.com/coder/coder/v2/coderd/database/dbmem"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/enterprise/coderd/coderdenttest"
 	"github.com/coder/coder/v2/enterprise/trialer"
@@ -24,12 +24,10 @@ func TestTrialer(t *testing.T) {
 		_, _ = w.Write([]byte(license))
 	}))
 	defer srv.Close()
-	db, _ := dbtestutil.NewDB(t)
-	err := db.InsertDeploymentID(context.Background(), "test-deployment")
-	require.NoError(t, err)
+	db := dbmem.New()
 
 	gen := trialer.New(db, srv.URL, coderdenttest.Keys)
-	err = gen(context.Background(), codersdk.LicensorTrialRequest{Email: "kyle+colin@coder.com"})
+	err := gen(context.Background(), codersdk.LicensorTrialRequest{Email: "kyle+colin@coder.com"})
 	require.NoError(t, err)
 	licenses, err := db.GetLicenses(context.Background())
 	require.NoError(t, err)

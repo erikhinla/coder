@@ -117,10 +117,6 @@ type Config struct {
 	// Note that this is different from the devcontainers feature, which uses
 	// subagents.
 	ExperimentalContainers bool
-	// X11Net allows overriding the networking implementation used for X11
-	// forwarding listeners. When nil, a default implementation backed by the
-	// standard library networking package is used.
-	X11Net X11Network
 }
 
 type Server struct {
@@ -135,10 +131,9 @@ type Server struct {
 	// a lock on mu but protected by closing.
 	wg sync.WaitGroup
 
-	Execer       agentexec.Execer
-	logger       slog.Logger
-	srv          *ssh.Server
-	x11Forwarder *x11Forwarder
+	Execer agentexec.Execer
+	logger slog.Logger
+	srv    *ssh.Server
 
 	config *Config
 
@@ -195,20 +190,6 @@ func NewServer(ctx context.Context, logger slog.Logger, prometheusRegistry *prom
 		config: config,
 
 		metrics: metrics,
-		x11Forwarder: &x11Forwarder{
-			logger:           logger,
-			x11HandlerErrors: metrics.x11HandlerErrors,
-			fs:               fs,
-			displayOffset:    *config.X11DisplayOffset,
-			sessions:         make(map[*x11Session]struct{}),
-			connections:      make(map[net.Conn]struct{}),
-			network: func() X11Network {
-				if config.X11Net != nil {
-					return config.X11Net
-				}
-				return osNet{}
-			}(),
-		},
 	}
 
 	srv := &ssh.Server{
@@ -476,7 +457,7 @@ func (s *Server) sessionHandler(session ssh.Session) {
 
 	x11, hasX11 := session.X11()
 	if hasX11 {
-		display, handled := s.x11Forwarder.x11Handler(ctx, session)
+		display, handled := s.x11Handler(ctx, x11)
 		if !handled {
 			logger.Error(ctx, "x11 handler failed")
 			closeCause("x11 handler failed")
@@ -609,9 +590,7 @@ func (s *Server) startNonPTYSession(logger slog.Logger, session ssh.Session, mag
 	// and SSH server close may be delayed.
 	cmd.SysProcAttr = cmdSysProcAttr()
 
-	// to match OpenSSH, we don't actually tear a non-TTY command down, even if the session ends. OpenSSH closes the
-	// pipes to the process when the session ends; which is what happens here since we wire the command up to the
-	// session for I/O.
+	// to match OpenSSH, we don't actually tear a non-TTY command down, even if the session ends.
 	// c.f. https://github.com/coder/coder/issues/18519#issuecomment-3019118271
 	cmd.Cancel = nil
 
@@ -1174,9 +1153,6 @@ func (s *Server) Close() error {
 	err := s.srv.Close()
 
 	s.mu.Unlock()
-
-	s.logger.Debug(ctx, "closing X11 forwarding")
-	_ = s.x11Forwarder.Close()
 
 	s.logger.Debug(ctx, "waiting for all goroutines to exit")
 	s.wg.Wait() // Wait for all goroutines to exit.

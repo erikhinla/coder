@@ -26,6 +26,45 @@ type parameterValue struct {
 	Source parameterValueSource
 }
 
+type ResolverError struct {
+	Diagnostics hcl.Diagnostics
+	Parameter   map[string]hcl.Diagnostics
+}
+
+// Error is a pretty bad format for these errors. Try to avoid using this.
+func (e *ResolverError) Error() string {
+	var diags hcl.Diagnostics
+	diags = diags.Extend(e.Diagnostics)
+	for _, d := range e.Parameter {
+		diags = diags.Extend(d)
+	}
+
+	return diags.Error()
+}
+
+func (e *ResolverError) HasError() bool {
+	if e.Diagnostics.HasErrors() {
+		return true
+	}
+
+	for _, diags := range e.Parameter {
+		if diags.HasErrors() {
+			return true
+		}
+	}
+	return false
+}
+
+func (e *ResolverError) Extend(parameterName string, diag hcl.Diagnostics) {
+	if e.Parameter == nil {
+		e.Parameter = make(map[string]hcl.Diagnostics)
+	}
+	if _, ok := e.Parameter[parameterName]; !ok {
+		e.Parameter[parameterName] = hcl.Diagnostics{}
+	}
+	e.Parameter[parameterName] = e.Parameter[parameterName].Extend(diag)
+}
+
 //nolint:revive // firstbuild is a control flag to turn on immutable validation
 func ResolveParameters(
 	ctx context.Context,
@@ -73,7 +112,10 @@ func ResolveParameters(
 		// always be valid. If there is a case where this is not true, then this has to
 		// be changed to allow the build to continue with a different set of values.
 
-		return nil, parameterValidationError(diags)
+		return nil, &ResolverError{
+			Diagnostics: diags,
+			Parameter:   nil,
+		}
 	}
 
 	// The user's input now needs to be validated against the parameters.
@@ -113,13 +155,16 @@ func ResolveParameters(
 	// are fatal. Additional validation for immutability has to be done manually.
 	output, diags = renderer.Render(ctx, ownerID, values.ValuesMap())
 	if diags.HasErrors() {
-		return nil, parameterValidationError(diags)
+		return nil, &ResolverError{
+			Diagnostics: diags,
+			Parameter:   nil,
+		}
 	}
 
 	// parameterNames is going to be used to remove any excess values that were left
 	// around without a parameter.
 	parameterNames := make(map[string]struct{}, len(output.Parameters))
-	parameterError := parameterValidationError(nil)
+	parameterError := &ResolverError{}
 	for _, parameter := range output.Parameters {
 		parameterNames[parameter.Name] = struct{}{}
 

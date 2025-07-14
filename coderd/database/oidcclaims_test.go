@@ -222,6 +222,7 @@ func (g userGenerator) withLink(lt database.LoginType, rawJSON json.RawMessage) 
 		err := sql.UpdateUserLinkRawJSON(context.Background(), user.ID, rawJSON)
 		require.NoError(t, err)
 	} else {
+		// no need to test the json key logic in dbmem. Everything is type safe.
 		var claims database.UserLinkClaims
 		err := json.Unmarshal(rawJSON, &claims)
 		require.NoError(t, err)

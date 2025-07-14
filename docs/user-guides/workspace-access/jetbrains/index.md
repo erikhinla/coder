@@ -15,7 +15,7 @@ IDEs are supported for remote development:
 - [JetBrains Fleet](./fleet.md)
 
 > [!IMPORTANT]
-> Remote development works with paid and non-commercial licenses of JetBrains IDEs
+> Remote development only works with paid versions of JetBrains IDEs.
 
 <children></children>
 

@@ -816,7 +816,6 @@ func PreviewParameter(param previewtypes.Parameter) codersdk.PreviewParameter {
 				Placeholder: param.Styling.Placeholder,
 				Disabled:    param.Styling.Disabled,
 				Label:       param.Styling.Label,
-				MaskInput:   param.Styling.MaskInput,
 			},
 			Mutable:      param.Mutable,
 			DefaultValue: PreviewHCLString(param.DefaultValue),

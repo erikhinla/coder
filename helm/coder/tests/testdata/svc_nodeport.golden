@@ -168,7 +168,6 @@ spec:
             path: /healthz
             port: http
             scheme: HTTP
-          initialDelaySeconds: 0
         name: coder
         ports:
         - containerPort: 8080
@@ -179,7 +178,6 @@ spec:
             path: /healthz
             port: http
             scheme: HTTP
-          initialDelaySeconds: 0
         resources:
           limits:
             cpu: 2000m

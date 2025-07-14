@@ -243,28 +243,7 @@ func (r *dynamicRenderer) getWorkspaceOwnerData(ctx context.Context, ownerID uui
 		return nil // already fetched
 	}
 
-	owner, err := WorkspaceOwner(ctx, r.db, r.data.templateVersion.OrganizationID, ownerID)
-	if err != nil {
-		return err
-	}
-
-	r.currentOwner = owner
-	return nil
-}
-
-func (r *dynamicRenderer) Close() {
-	r.once.Do(r.close)
-}
-
-func ProvisionerVersionSupportsDynamicParameters(version string) bool {
-	major, minor, err := apiversion.Parse(version)
-	// If the api version is not valid or less than 1.6, we need to use the static parameters
-	useStaticParams := err != nil || major < 1 || (major == 1 && minor < 6)
-	return !useStaticParams
-}
-
-func WorkspaceOwner(ctx context.Context, db database.Store, org uuid.UUID, ownerID uuid.UUID) (*previewtypes.WorkspaceOwner, error) {
-	user, err := db.GetUserByID(ctx, ownerID)
+	user, err := r.db.GetUserByID(ctx, ownerID)
 	if err != nil {
 		// If the user failed to read, we also try to read the user from their
 		// organization member. You only need to be able to read the organization member
@@ -273,37 +252,37 @@ func WorkspaceOwner(ctx context.Context, db database.Store, org uuid.UUID, owner
 		// Only the terraform files can therefore leak more information than the
 		// caller should have access to. All this info should be public assuming you can
 		// read the user though.
-		mem, err := database.ExpectOne(db.OrganizationMembers(ctx, database.OrganizationMembersParams{
-			OrganizationID: org,
+		mem, err := database.ExpectOne(r.db.OrganizationMembers(ctx, database.OrganizationMembersParams{
+			OrganizationID: r.data.templateVersion.OrganizationID,
 			UserID:         ownerID,
 			IncludeSystem:  true,
 		}))
 		if err != nil {
-			return nil, xerrors.Errorf("fetch user: %w", err)
+			return xerrors.Errorf("fetch user: %w", err)
 		}
 
 		// Org member fetched, so use the provisioner context to fetch the user.
 		//nolint:gocritic // Has the correct permissions, and matches the provisioning flow.
-		user, err = db.GetUserByID(dbauthz.AsProvisionerd(ctx), mem.OrganizationMember.UserID)
+		user, err = r.db.GetUserByID(dbauthz.AsProvisionerd(ctx), mem.OrganizationMember.UserID)
 		if err != nil {
-			return nil, xerrors.Errorf("fetch user: %w", err)
+			return xerrors.Errorf("fetch user: %w", err)
 		}
 	}
 
 	// nolint:gocritic // This is kind of the wrong query to use here, but it
 	// matches how the provisioner currently works. We should figure out
 	// something that needs less escalation but has the correct behavior.
-	row, err := db.GetAuthorizationUserRoles(dbauthz.AsProvisionerd(ctx), ownerID)
+	row, err := r.db.GetAuthorizationUserRoles(dbauthz.AsProvisionerd(ctx), ownerID)
 	if err != nil {
-		return nil, xerrors.Errorf("user roles: %w", err)
+		return xerrors.Errorf("user roles: %w", err)
 	}
 	roles, err := row.RoleNames()
 	if err != nil {
-		return nil, xerrors.Errorf("expand roles: %w", err)
+		return xerrors.Errorf("expand roles: %w", err)
 	}
 	ownerRoles := make([]previewtypes.WorkspaceOwnerRBACRole, 0, len(roles))
 	for _, it := range roles {
-		if it.OrganizationID != uuid.Nil && it.OrganizationID != org {
+		if it.OrganizationID != uuid.Nil && it.OrganizationID != r.data.templateVersion.OrganizationID {
 			continue
 		}
 		var orgID string
@@ -319,28 +298,28 @@ func WorkspaceOwner(ctx context.Context, db database.Store, org uuid.UUID, owner
 	// The correct public key has to be sent. This will not be leaked
 	// unless the template leaks it.
 	// nolint:gocritic
-	key, err := db.GetGitSSHKey(dbauthz.AsProvisionerd(ctx), ownerID)
+	key, err := r.db.GetGitSSHKey(dbauthz.AsProvisionerd(ctx), ownerID)
 	if err != nil && !xerrors.Is(err, sql.ErrNoRows) {
-		return nil, xerrors.Errorf("ssh key: %w", err)
+		return xerrors.Errorf("ssh key: %w", err)
 	}
 
 	// The groups need to be sent to preview. These groups are not exposed to the
 	// user, unless the template does it through the parameters. Regardless, we need
 	// the correct groups, and a user might not have read access.
 	// nolint:gocritic
-	groups, err := db.GetGroups(dbauthz.AsProvisionerd(ctx), database.GetGroupsParams{
-		OrganizationID: org,
+	groups, err := r.db.GetGroups(dbauthz.AsProvisionerd(ctx), database.GetGroupsParams{
+		OrganizationID: r.data.templateVersion.OrganizationID,
 		HasMemberID:    ownerID,
 	})
 	if err != nil {
-		return nil, xerrors.Errorf("groups: %w", err)
+		return xerrors.Errorf("groups: %w", err)
 	}
 	groupNames := make([]string, 0, len(groups))
 	for _, it := range groups {
 		groupNames = append(groupNames, it.Group.Name)
 	}
 
-	return &previewtypes.WorkspaceOwner{
+	r.currentOwner = &previewtypes.WorkspaceOwner{
 		ID:           user.ID.String(),
 		Name:         user.Username,
 		FullName:     user.Name,
@@ -349,5 +328,17 @@ func WorkspaceOwner(ctx context.Context, db database.Store, org uuid.UUID, owner
 		RBACRoles:    ownerRoles,
 		SSHPublicKey: key.PublicKey,
 		Groups:       groupNames,
-	}, nil
+	}
+	return nil
+}
+
+func (r *dynamicRenderer) Close() {
+	r.once.Do(r.close)
+}
+
+func ProvisionerVersionSupportsDynamicParameters(version string) bool {
+	major, minor, err := apiversion.Parse(version)
+	// If the api version is not valid or less than 1.6, we need to use the static parameters
+	useStaticParams := err != nil || major < 1 || (major == 1 && minor < 6)
+	return !useStaticParams
 }

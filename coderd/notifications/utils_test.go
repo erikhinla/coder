@@ -94,6 +94,7 @@ func (i *dispatchInterceptor) Dispatcher(payload types.MessagePayload, title, bo
 		}
 
 		retryable, err = deliveryFn(ctx, msgID)
+
 		if err != nil {
 			i.err.Add(1)
 			i.lastErr.Store(err)

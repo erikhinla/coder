@@ -1,4 +1,3 @@
-import type { BuildInfoResponse, Experiment } from "api/typesGenerated";
 import {
 	Sidebar as BaseSidebar,
 	SettingsSidebarNavItem as SidebarNavItem,
@@ -7,15 +6,12 @@ import { Stack } from "components/Stack/Stack";
 import { ArrowUpRight } from "lucide-react";
 import type { Permissions } from "modules/permissions";
 import type { FC } from "react";
-import { isDevBuild } from "utils/buildInfo";
 
 interface DeploymentSidebarViewProps {
 	/** Site-wide permissions. */
 	permissions: Permissions;
 	showOrganizations: boolean;
 	hasPremiumLicense: boolean;
-	experiments: Experiment[];
-	buildInfo: BuildInfoResponse;
 }
 
 /**
@@ -26,8 +22,6 @@ export const DeploymentSidebarView: FC<DeploymentSidebarViewProps> = ({
 	permissions,
 	showOrganizations,
 	hasPremiumLicense,
-	experiments,
-	buildInfo,
 }) => {
 	return (
 		<BaseSidebar>
@@ -53,12 +47,10 @@ export const DeploymentSidebarView: FC<DeploymentSidebarViewProps> = ({
 						External Authentication
 					</SidebarNavItem>
 				)}
-				{permissions.viewDeploymentConfig &&
-					(experiments.includes("oauth2") || isDevBuild(buildInfo)) && (
-						<SidebarNavItem href="/deployment/oauth2-provider/apps">
-							OAuth2 Applications
-						</SidebarNavItem>
-					)}
+				{/* Not exposing this yet since token exchange is not finished yet.
+          <SidebarNavItem href="oauth2-provider/apps">
+            OAuth2 Applications
+          </SidebarNavItem>*/}
 				{permissions.viewDeploymentConfig && (
 					<SidebarNavItem href="/deployment/network">Network</SidebarNavItem>
 				)}
