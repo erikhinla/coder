@@ -32,7 +32,6 @@ import { QueryClient, QueryClientProvider } from "react-query";
 import { withRouter } from "storybook-addon-remix-react-router";
 import "theme/globalFonts";
 import themes from "../src/theme";
-import { queryParametersKey } from "../src/testHelpers/chromatic"
 
 DecoratorHelpers.initializeThemeState(Object.keys(themes), "dark");
 
@@ -102,6 +101,13 @@ function withHelmet(Story) {
 	);
 }
 
+/**
+ * This JSX file isn't part of the main project, so it doesn't get to use the
+ * ambient types defined in `storybook.d.ts` to provide extra type-safety.
+ * Extracting main key to avoid typos.
+ */
+const queryParametersKey = "queries";
+
 /** @type {Decorator} */
 function withQuery(Story, { parameters }) {
 	const queryClient = new QueryClient({
@@ -114,6 +120,7 @@ function withQuery(Story, { parameters }) {
 	});
 
 	if (parameters[queryParametersKey]) {
+parameters
 		for (const query of parameters[queryParametersKey]) {
 			queryClient.setQueryData(query.key, query.data);
 		}

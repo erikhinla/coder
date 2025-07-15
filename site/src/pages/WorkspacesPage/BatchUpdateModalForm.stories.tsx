@@ -1,9 +1,13 @@
-import type { Meta, StoryContext, StoryObj } from "@storybook/react";
+import type {
+	Meta,
+	Parameters,
+	StoryContext,
+	StoryObj,
+} from "@storybook/react";
 import { templateVersionRoot } from "api/queries/templates";
 import type { TemplateVersion, Workspace } from "api/typesGenerated";
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { useQueryClient } from "react-query";
-import { QueryParameterSeed, queryParametersKey } from "testHelpers/chromatic";
 import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
 import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 
@@ -26,13 +30,15 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+type Seeds = NonNullable<Parameters["queries"]>;
+
 type PatchedDependencies = Readonly<{
 	workspaces: readonly Workspace[];
-	seeds: QueryParameterSeed[];
+	seeds: Seeds;
 }>;
 function createPatchedDependencies(size: number): PatchedDependencies {
 	const workspaces: Workspace[] = [];
-	const seeds: QueryParameterSeed[] = [];
+	const seeds: Seeds = [];
 
 	for (let i = 1; i <= size; i++) {
 		const patchedTemplateVersion: TemplateVersion = {
@@ -63,16 +69,6 @@ function createPatchedDependencies(size: number): PatchedDependencies {
 	return { workspaces, seeds };
 }
 
-type Context = StoryContext<ComponentProps<typeof BatchUpdateModalForm>>;
-function patchContext(
-	ctx: Context,
-	workspaces: readonly Workspace[],
-	seeds: QueryParameterSeed[],
-): void {
-	ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-	ctx.parameters = { ...ctx.parameters, [queryParametersKey]: seeds };
-}
-
 export const NoWorkspacesSelected: Story = {
 	args: {
 		workspacesToUpdate: [],
@@ -82,7 +78,8 @@ export const NoWorkspacesSelected: Story = {
 export const OnlyReadyToUpdate: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, seeds } = createPatchedDependencies(3);
-		patchContext(ctx, workspaces, seeds);
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
 	},
 };
 
@@ -90,10 +87,16 @@ export const CurrentlyProcessing: Story = {
 	args: { isProcessing: true },
 	beforeEach: (ctx) => {
 		const { workspaces, seeds } = createPatchedDependencies(3);
-		patchContext(ctx, workspaces, seeds);
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
 	},
 };
 
+/**
+ * @todo 2025-07-15 - Need to figure out if there's a decent way to validate
+ * that the onCancel callback gets called when you press the "Close" button,
+ * without going into Jest+RTL.
+ */
 export const OnlyDormantWorkspaces: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, seeds } = createPatchedDependencies(3);
@@ -101,17 +104,16 @@ export const OnlyDormantWorkspaces: Story = {
 			const writable = ws as Writeable<Workspace>;
 			writable.dormant_at = new Date().toISOString();
 		}
-		patchContext(ctx, workspaces, seeds);
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
 	},
 };
 
-/**
- * @todo This story is correct, but the component output is wrong
- */
 export const FetchError: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, seeds } = createPatchedDependencies(3);
-		patchContext(ctx, workspaces, seeds);
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
 	},
 	decorators: [
 		(Story, ctx) => {
