@@ -208,8 +208,8 @@ const ContainerBody: FC<ContainerBodyProps> = ({
 		// Have to subtract parent padding via margin values and then add it
 		// back as child padding so that there's no risk of the scrollbar
 		// covering up content when the container gets tall enough to overflow
-		<div className="overflow-y-auto flex flex-col gap-6 -mx-8 -mt-8 p-8">
-			<div className="flex flex-col gap-5">
+		<div className="overflow-y-auto flex flex-col gap-3 -mx-8 -mt-8 p-8">
+			<div className="flex flex-col gap-3">
 				<DialogTitle asChild>
 					<h3 className="text-3xl font-semibold m-0 leading-tight">
 						{headerText}
