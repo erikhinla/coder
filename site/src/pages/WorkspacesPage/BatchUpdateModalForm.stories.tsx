@@ -34,11 +34,11 @@ type QueryEntry = NonNullable<Parameters["queries"]>;
 
 type PatchedDependencies = Readonly<{
 	workspaces: readonly Workspace[];
-	seeds: QueryEntry;
+	queries: QueryEntry;
 }>;
 function createPatchedDependencies(size: number): PatchedDependencies {
 	const workspaces: Workspace[] = [];
-	const seeds: QueryEntry = [];
+	const queries: QueryEntry = [];
 
 	for (let i = 1; i <= size; i++) {
 		const patchedTemplateVersion: TemplateVersion = {
@@ -60,13 +60,13 @@ function createPatchedDependencies(size: number): PatchedDependencies {
 		};
 
 		workspaces.push(patchedWorkspace);
-		seeds.push({
+		queries.push({
 			key: [templateVersionRoot, patchedWorkspace.template_active_version_id],
 			data: patchedTemplateVersion,
 		});
 	}
 
-	return { workspaces, seeds };
+	return { workspaces, queries };
 }
 
 export const NoWorkspacesSelected: Story = {
@@ -75,22 +75,33 @@ export const NoWorkspacesSelected: Story = {
 	},
 };
 
-export const NoWorkspacesToUpdate: Story = {};
-
 export const OnlyReadyToUpdate: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(3);
+		const { workspaces, queries } = createPatchedDependencies(3);
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
+	},
+};
+
+export const NoWorkspacesToUpdate: Story = {
+	beforeEach: (ctx) => {
+		const { workspaces, queries } = createPatchedDependencies(3);
+		for (const ws of workspaces) {
+			const writable = ws as Writeable<Workspace>;
+			writable.outdated = false;
+		}
+
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 };
 
 export const CurrentlyProcessing: Story = {
 	args: { isProcessing: true },
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(3);
+		const { workspaces, queries } = createPatchedDependencies(3);
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 };
 
@@ -101,21 +112,21 @@ export const CurrentlyProcessing: Story = {
  */
 export const OnlyDormantWorkspaces: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(3);
+		const { workspaces, queries } = createPatchedDependencies(3);
 		for (const ws of workspaces) {
 			const writable = ws as Writeable<Workspace>;
 			writable.dormant_at = new Date().toISOString();
 		}
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 };
 
 export const FetchError: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(3);
+		const { workspaces, queries } = createPatchedDependencies(3);
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 	decorators: [
 		(Story, ctx) => {
@@ -139,7 +150,7 @@ export const FetchError: Story = {
 export const TransitioningWorkspaces: Story = {
 	args: { isProcessing: true },
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(
+		const { workspaces, queries } = createPatchedDependencies(
 			2 * ACTIVE_BUILD_STATUSES.length,
 		);
 		for (const [i, ws] of workspaces.entries()) {
@@ -150,19 +161,31 @@ export const TransitioningWorkspaces: Story = {
 			writable.status = ACTIVE_BUILD_STATUSES[i % ACTIVE_BUILD_STATUSES.length];
 		}
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 };
 
 export const RunningWorkspaces: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, seeds } = createPatchedDependencies(3);
+		const { workspaces, queries } = createPatchedDependencies(3);
 		for (const ws of workspaces) {
 			const writable = ws.latest_build as Writeable<WorkspaceBuild>;
 			writable.status = "running";
 		}
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, queries: seeds };
+		ctx.parameters = { ...ctx.parameters, queries };
+	},
+};
+
+export const RunningWorkspacesFailedValidation: Story = {
+	beforeEach: (ctx) => {
+		const { workspaces, queries } = createPatchedDependencies(3);
+		for (const ws of workspaces) {
+			const writable = ws.latest_build as Writeable<WorkspaceBuild>;
+			writable.status = "running";
+		}
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries };
 	},
 	play: async () => {
 		// Can't use canvasElement from the play function's context because the

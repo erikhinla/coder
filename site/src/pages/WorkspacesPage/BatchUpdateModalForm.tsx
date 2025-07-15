@@ -318,6 +318,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 
+	const hasWorkspaces = workspacesToUpdate.length > 0;
 	const someWorkspacesCanBeUpdated = readyToUpdate.length > 0;
 	const formIsNeeded = someWorkspacesCanBeUpdated || dormant.length > 0;
 	if (!formIsNeeded) {
@@ -325,12 +326,24 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			<Container>
 				<ContainerBody
 					headerText={
-						workspacesToUpdate.length === 0
-							? "No workspaces selected"
-							: "All workspaces up to date"
+						hasWorkspaces
+							? "All workspaces up to date"
+							: "No workspaces selected"
 					}
-					description="No updates needed"
 					showDescription
+					description={
+						hasWorkspaces ? (
+							<>
+								None of the{" "}
+								<span className="text-content-primary font-semibold">
+									{workspacesToUpdate.length}
+								</span>{" "}
+								selected workspaces need updates.
+							</>
+						) : (
+							"Nothing to update."
+						)
+					}
 				>
 					{error !== undefined && <ErrorAlert error={error} />}
 				</ContainerBody>
