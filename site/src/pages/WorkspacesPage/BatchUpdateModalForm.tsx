@@ -345,22 +345,23 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			.map((ws) => ws.id),
 	);
 
-	// Just to be on the safe side, we need to derive the IDs from all checked
-	// workspaces, because the separation result could theoretically change
-	// on re-render after any workspace state transitions end
+	/**
+	 * Two things:
+	 * 1. We have to make sure that we don't let the user submit anything while
+	 *    workspaces are transitioning, or else we'll run into a race condition.
+	 *    If a user starts a workspace, and then immediately batch-updates it,
+	 *    the workspace won't be in the running state yet. We need to issue
+	 *    warnings about how updating running workspaces is a destructive
+	 *    action, but if the the user goes through the form quickly enough,
+	 *    they'll be able to update without seeing the warning.
+	 * 2. Just to be on the safe side, we also need to derive the transitioning
+	 *    IDs from all checked workspaces, because the separation result could
+	 *    theoretically change on re-render after any workspace state
+	 *    transitions end.
+	 */
 	const transitioningIds = new Set<string>(
 		workspacesToUpdate
-			.filter((ws) => {
-				// We have to make sure that we don't let the user submit
-				// anything while workspaces are transitioning, or else we'll
-				// run into a race condition. If a user starts a workspace, and
-				// then immediately batch-updates it, the workspace won't be in
-				// the running state yet. We need to issue warnings about how
-				// updating running workspaces is a destructive action, but if
-				// the user goes through the form quickly enough, they'll be
-				// able to update without seeing the warning.
-				return ACTIVE_BUILD_STATUSES.includes(ws.latest_build.status);
-			})
+			.filter((ws) => ACTIVE_BUILD_STATUSES.includes(ws.latest_build.status))
 			.map((ws) => ws.id),
 	);
 
