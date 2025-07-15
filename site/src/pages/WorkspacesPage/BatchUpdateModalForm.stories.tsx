@@ -6,10 +6,11 @@ import type {
 } from "@storybook/react";
 import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
-import { useQueryClient } from "react-query";
+import { QueryKey, QueryOptions, useQueryClient } from "react-query";
 import { templateVersionRoot } from "api/queries/templates";
 import type { TemplateVersion, Workspace } from "api/typesGenerated";
 import { ComponentProps } from "react";
+import { QueryParameterSeed, queryParametersKey } from "testHelpers/chromatic";
 
 type Writeable<T> = { -readonly [Key in keyof T]: T[Key] };
 
@@ -18,7 +19,6 @@ const templateVersionsKey = "_templateVersions";
 const meta: Meta<typeof BatchUpdateModalForm> = {
 	title: "pages/WorkspacesPage/BatchUpdateModalForm",
 	component: BatchUpdateModalForm,
-
 	args: {
 		open: true,
 		isProcessing: false,
@@ -28,30 +28,6 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 		// annoying when working with the Story in the Storybook UI
 		onCancel: () => {},
 	},
-
-	decorators: [
-		// This decorator is intended to be attached to each story, to make sure
-		// that data-fetching dependencies are properly seeded. But it won't
-		// work by itself. Each story must properly initialize all `args`, and
-		// embed relevant template versions via `ctx.parameters`. Probably the
-		// easiest way to do that is via each story's `beforeEach` function
-		(Story, ctx) => {
-			const queryClient = useQueryClient();
-			const versions = ctx.parameters[
-				templateVersionsKey
-			] as readonly TemplateVersion[];
-
-			for (const ws of ctx.args.workspacesToUpdate) {
-				const v = versions.find((v) => v.id === ws.template_active_version_id);
-				queryClient.setQueryData(
-					[templateVersionRoot, ws.template_active_version_id],
-					v,
-				);
-			}
-
-			return <Story />;
-		},
-	],
 };
 
 export default meta;
@@ -59,11 +35,11 @@ type Story = StoryObj<typeof meta>;
 
 type PatchedDependencies = Readonly<{
 	workspaces: readonly Workspace[];
-	templateVersions: readonly TemplateVersion[];
+	seeds: QueryParameterSeed[];
 }>;
 function createPatchedDependencies(size: number): PatchedDependencies {
 	const workspaces: Workspace[] = [];
-	const templateVersions: TemplateVersion[] = [];
+	const seeds: QueryParameterSeed[] = [];
 
 	for (let i = 1; i <= size; i++) {
 		const patchedTemplateVersion: TemplateVersion = {
@@ -85,23 +61,23 @@ function createPatchedDependencies(size: number): PatchedDependencies {
 		};
 
 		workspaces.push(patchedWorkspace);
-		templateVersions.push(patchedTemplateVersion);
+		seeds.push({
+			key: [templateVersionRoot, patchedWorkspace.template_active_version_id],
+			data: patchedTemplateVersion,
+		});
 	}
 
-	return { workspaces, templateVersions };
+	return { workspaces, seeds };
 }
 
 type Context = StoryContext<ComponentProps<typeof BatchUpdateModalForm>>;
 function patchContext(
 	ctx: Context,
 	workspaces: readonly Workspace[],
-	templateVersions: readonly TemplateVersion[],
+	seeds: QueryParameterSeed[],
 ): void {
 	ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-	ctx.parameters = {
-		...ctx.parameters,
-		[templateVersionsKey]: templateVersions,
-	};
+	ctx.parameters = { ...ctx.parameters, [queryParametersKey]: seeds };
 }
 
 export const NoWorkspacesSelected: Story = {
@@ -110,28 +86,61 @@ export const NoWorkspacesSelected: Story = {
 	},
 };
 
-export const CurrentlyProcessing: Story = {
-	args: { isProcessing: true },
+export const OnlyReadyToUpdate: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, templateVersions } = createPatchedDependencies(3);
-		patchContext(ctx, workspaces, templateVersions);
+		const { workspaces, seeds } = createPatchedDependencies(3);
+		patchContext(ctx, workspaces, seeds);
 	},
 };
 
+export const CurrentlyProcessing: Story = {
+	args: { isProcessing: true },
+	beforeEach: (ctx) => {
+		const { workspaces, seeds } = createPatchedDependencies(3);
+		patchContext(ctx, workspaces, seeds);
+	},
+};
+
+/**
+ * @todo This story is correct, but the component output is wrong
+ */
 export const OnlyDormantWorkspaces: Story = {
 	beforeEach: (ctx) => {
-		const { workspaces, templateVersions } = createPatchedDependencies(3);
+		const { workspaces, seeds } = createPatchedDependencies(3);
 		for (const ws of workspaces) {
 			const writable = ws as Writeable<Workspace>;
 			writable.dormant_at = new Date().toISOString();
 		}
-		patchContext(ctx, workspaces, templateVersions);
+		patchContext(ctx, workspaces, seeds);
 	},
 };
 
-export const FetchError: Story = {};
+/**
+ * @todo This story is correct, but the component output is wrong
+ */
+export const FetchError: Story = {
+	beforeEach: (ctx) => {
+		const { workspaces, seeds } = createPatchedDependencies(3);
+		patchContext(ctx, workspaces, seeds);
+	},
+	decorators: [
+		(Story, ctx) => {
+			const queryClient = useQueryClient();
+			queryClient.clear();
 
-export const OnlyReadyToUpdate: Story = {};
+			for (const ws of ctx.args.workspacesToUpdate) {
+				void queryClient.fetchQuery({
+					queryKey: [templateVersionRoot, ws.template_active_version_id],
+					queryFn: () => {
+						throw new Error("Workspaces? Sir, this is a Wendy's.");
+					},
+				});
+			}
+
+			return <Story />;
+		},
+	],
+};
 
 export const TransitioningWorkspaces: Story = {};
 

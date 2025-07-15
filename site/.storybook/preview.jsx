@@ -32,6 +32,7 @@ import { QueryClient, QueryClientProvider } from "react-query";
 import { withRouter } from "storybook-addon-remix-react-router";
 import "theme/globalFonts";
 import themes from "../src/theme";
+import { queryParametersKey } from "../src/testHelpers/chromatic"
 
 DecoratorHelpers.initializeThemeState(Object.keys(themes), "dark");
 
@@ -112,8 +113,8 @@ function withQuery(Story, { parameters }) {
 		},
 	});
 
-	if (parameters.queries) {
-		for (const query of parameters.queries) {
+	if (parameters[queryParametersKey]) {
+		for (const query of parameters[queryParametersKey]) {
 			queryClient.setQueryData(query.key, query.data);
 		}
 	}
