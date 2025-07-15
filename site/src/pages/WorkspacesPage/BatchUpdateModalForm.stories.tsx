@@ -229,6 +229,7 @@ export const RunningWorkspacesFailedValidation: Story = {
 };
 
 export const MixOfWorkspaces: Story = {
+	args: { isProcessing: true },
 	/**
 	 * List of all workspace kinds we're trying to represent here:
 	 * - Ready to update + stopped
