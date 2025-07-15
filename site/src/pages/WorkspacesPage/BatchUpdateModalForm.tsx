@@ -1,7 +1,7 @@
 import { Label } from "@radix-ui/react-label";
 import { Slot } from "@radix-ui/react-slot";
 import { templateVersion } from "api/queries/templates";
-import type { Workspace, WorkspaceStatus } from "api/typesGenerated";
+import type { Workspace } from "api/typesGenerated";
 import { ErrorAlert } from "components/Alert/ErrorAlert";
 import { Avatar } from "components/Avatar/Avatar";
 import { Badge } from "components/Badge/Badge";
@@ -18,7 +18,7 @@ import { TriangleAlert } from "lucide-react";
 import {
 	type FC,
 	type ForwardedRef,
-	PropsWithChildren,
+	type PropsWithChildren,
 	type ReactNode,
 	useId,
 	useRef,

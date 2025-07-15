@@ -1,9 +1,19 @@
-import type { Meta, StoryObj } from "@storybook/react";
+import type {
+	Meta,
+	ReactRenderer,
+	StoryContext,
+	StoryObj,
+} from "@storybook/react";
 import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
 import { useQueryClient } from "react-query";
 import { templateVersionRoot } from "api/queries/templates";
 import type { TemplateVersion, Workspace } from "api/typesGenerated";
+import { ComponentProps } from "react";
+
+type Writeable<T> = { -readonly [Key in keyof T]: T[Key] };
+
+const templateVersionsKey = "_templateVersions";
 
 const meta: Meta<typeof BatchUpdateModalForm> = {
 	title: "pages/WorkspacesPage/BatchUpdateModalForm",
@@ -27,8 +37,9 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 		// easiest way to do that is via each story's `beforeEach` function
 		(Story, ctx) => {
 			const queryClient = useQueryClient();
-			const versions = ctx.parameters
-				._templateVersions as readonly TemplateVersion[];
+			const versions = ctx.parameters[
+				templateVersionsKey
+			] as readonly TemplateVersion[];
 
 			for (const ws of ctx.args.workspacesToUpdate) {
 				const v = versions.find((v) => v.id === ws.template_active_version_id);
@@ -46,6 +57,53 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
+type PatchedDependencies = Readonly<{
+	workspaces: readonly Workspace[];
+	templateVersions: readonly TemplateVersion[];
+}>;
+function createPatchedDependencies(size: number): PatchedDependencies {
+	const workspaces: Workspace[] = [];
+	const templateVersions: TemplateVersion[] = [];
+
+	for (let i = 1; i <= size; i++) {
+		const patchedTemplateVersion: TemplateVersion = {
+			...MockTemplateVersion,
+			id: `${MockTemplateVersion.id}-${i}`,
+			name: `${MockTemplateVersion.name}-${i}`,
+		};
+
+		const patchedWorkspace: Workspace = {
+			...MockWorkspace,
+			outdated: true,
+			id: `${MockWorkspace.id}-${i}`,
+			template_active_version_id: patchedTemplateVersion.id,
+
+			latest_build: {
+				...MockWorkspace.latest_build,
+				status: "stopped",
+			},
+		};
+
+		workspaces.push(patchedWorkspace);
+		templateVersions.push(patchedTemplateVersion);
+	}
+
+	return { workspaces, templateVersions };
+}
+
+type Context = StoryContext<ComponentProps<typeof BatchUpdateModalForm>>;
+function patchContext(
+	ctx: Context,
+	workspaces: readonly Workspace[],
+	templateVersions: readonly TemplateVersion[],
+): void {
+	ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+	ctx.parameters = {
+		...ctx.parameters,
+		[templateVersionsKey]: templateVersions,
+	};
+}
+
 export const NoWorkspacesSelected: Story = {
 	args: {
 		workspacesToUpdate: [],
@@ -55,38 +113,21 @@ export const NoWorkspacesSelected: Story = {
 export const CurrentlyProcessing: Story = {
 	args: { isProcessing: true },
 	beforeEach: (ctx) => {
-		const workspaces: Workspace[] = [];
-		const templateVersions: TemplateVersion[] = [];
-
-		for (let i = 1; i <= 5; i++) {
-			const patchedTemplateVersion: TemplateVersion = {
-				...MockTemplateVersion,
-				id: `${MockTemplateVersion.id}-${i}`,
-				name: `${MockTemplateVersion.name}-${i}`,
-			};
-
-			const patchedWorkspace: Workspace = {
-				...MockWorkspace,
-				outdated: true,
-				id: `${MockWorkspace.id}-${i}`,
-				template_active_version_id: patchedTemplateVersion.id,
-
-				latest_build: {
-					...MockWorkspace.latest_build,
-					status: "stopped",
-				},
-			};
-
-			workspaces.push(patchedWorkspace);
-			templateVersions.push(patchedTemplateVersion);
-		}
-
-		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, _templateVersions: templateVersions };
+		const { workspaces, templateVersions } = createPatchedDependencies(3);
+		patchContext(ctx, workspaces, templateVersions);
 	},
 };
 
-export const OnlyDormantWorkspaces: Story = {};
+export const OnlyDormantWorkspaces: Story = {
+	beforeEach: (ctx) => {
+		const { workspaces, templateVersions } = createPatchedDependencies(3);
+		for (const ws of workspaces) {
+			const writable = ws as Writeable<Workspace>;
+			writable.dormant_at = new Date().toISOString();
+		}
+		patchContext(ctx, workspaces, templateVersions);
+	},
+};
 
 export const FetchError: Story = {};
 
