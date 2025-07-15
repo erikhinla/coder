@@ -28,7 +28,7 @@ import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 
 // To reduce the number of fetches, we reduce the fetch interval if there are no
 // active workspace builds.
-const ACTIVE_BUILD_STATUSES: WorkspaceStatus[] = [
+export const ACTIVE_BUILD_STATUSES: readonly WorkspaceStatus[] = [
 	"canceling",
 	"deleting",
 	"pending",

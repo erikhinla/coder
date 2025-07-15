@@ -26,6 +26,7 @@ import {
 } from "react";
 import { useQueries } from "react-query";
 import { cn } from "utils/cn";
+import { ACTIVE_BUILD_STATUSES } from "./WorkspacesPage";
 
 type WorkspacePartitionByUpdateType = Readonly<{
 	dormant: readonly Workspace[];
@@ -279,21 +280,6 @@ const WorkspacesListSection: FC<WorkspacesListSectionProps> = ({
 // certain situations and could destroy their data
 type ConsequencesStage = "notAccepted" | "accepted" | "failedValidation";
 
-// We have to make sure that we don't let the user submit anything while
-// workspaces are transitioning, or else we'll run into a race condition. If a
-// user starts a workspace, and then immediately batch-updates it, the workspace
-// won't be in the running state yet. We need to issue warnings about how
-// updating running workspaces is a destructive action, but if the user goes
-// through the form quickly enough, they'll be able to update without seeing the
-// warning.
-const transitioningStatuses: readonly WorkspaceStatus[] = [
-	"canceling",
-	"deleting",
-	"pending",
-	"starting",
-	"stopping",
-];
-
 type ReviewFormProps = Readonly<{
 	workspacesToUpdate: readonly Workspace[];
 	isProcessing: boolean;
@@ -364,7 +350,17 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// on re-render after any workspace state transitions end
 	const transitioningIds = new Set<string>(
 		workspacesToUpdate
-			.filter((ws) => transitioningStatuses.includes(ws.latest_build.status))
+			.filter((ws) => {
+				// We have to make sure that we don't let the user submit
+				// anything while workspaces are transitioning, or else we'll
+				// run into a race condition. If a user starts a workspace, and
+				// then immediately batch-updates it, the workspace won't be in
+				// the running state yet. We need to issue warnings about how
+				// updating running workspaces is a destructive action, but if
+				// the user goes through the form quickly enough, they'll be
+				// able to update without seeing the warning.
+				return ACTIVE_BUILD_STATUSES.includes(ws.latest_build.status);
+			})
 			.map((ws) => ws.id),
 	);
 

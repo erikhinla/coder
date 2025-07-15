@@ -16,11 +16,11 @@ type Story = StoryObj<typeof meta>;
 
 export const MixOfWorkspaces: Story = {};
 
-export const ProcessingWithWorkspaces: Story = {};
+export const CurrentlyProcessing: Story = {};
 
-export const OnlyDormant: Story = {};
+export const OnlyDormantWorkspaces: Story = {};
 
-export const WorkspacesWitFetchError: Story = {};
+export const FetchError: Story = {};
 
 export const OnlyReadyToUpdate: Story = {};
 
