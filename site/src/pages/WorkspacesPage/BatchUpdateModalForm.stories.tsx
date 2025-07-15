@@ -1,15 +1,15 @@
-import type {
-	Meta,
-	Parameters,
-	StoryContext,
-	StoryObj,
-} from "@storybook/react";
+import type { Meta, Parameters, StoryObj } from "@storybook/react";
 import { templateVersionRoot } from "api/queries/templates";
-import type { TemplateVersion, Workspace } from "api/typesGenerated";
-import { useState, type ComponentProps } from "react";
+import type {
+	TemplateVersion,
+	Workspace,
+	WorkspaceBuild,
+} from "api/typesGenerated";
 import { useQueryClient } from "react-query";
 import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
 import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
+import { ACTIVE_BUILD_STATUSES } from "./WorkspacesPage";
+import { expect, screen, userEvent, within } from "@storybook/test";
 
 type Writeable<T> = { -readonly [Key in keyof T]: T[Key] };
 
@@ -30,15 +30,15 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-type Seeds = NonNullable<Parameters["queries"]>;
+type QueryEntry = NonNullable<Parameters["queries"]>;
 
 type PatchedDependencies = Readonly<{
 	workspaces: readonly Workspace[];
-	seeds: Seeds;
+	seeds: QueryEntry;
 }>;
 function createPatchedDependencies(size: number): PatchedDependencies {
 	const workspaces: Workspace[] = [];
-	const seeds: Seeds = [];
+	const seeds: QueryEntry = [];
 
 	for (let i = 1; i <= size; i++) {
 		const patchedTemplateVersion: TemplateVersion = {
@@ -74,6 +74,8 @@ export const NoWorkspacesSelected: Story = {
 		workspacesToUpdate: [],
 	},
 };
+
+export const NoWorkspacesToUpdate: Story = {};
 
 export const OnlyReadyToUpdate: Story = {
 	beforeEach: (ctx) => {
@@ -134,13 +136,69 @@ export const FetchError: Story = {
 	],
 };
 
-export const TransitioningWorkspaces: Story = {};
+export const TransitioningWorkspaces: Story = {
+	args: { isProcessing: true },
+	beforeEach: (ctx) => {
+		const { workspaces, seeds } = createPatchedDependencies(
+			2 * ACTIVE_BUILD_STATUSES.length,
+		);
+		for (const [i, ws] of workspaces.entries()) {
+			if (i % 2 === 0) {
+				continue;
+			}
+			const writable = ws.latest_build as Writeable<WorkspaceBuild>;
+			writable.status = ACTIVE_BUILD_STATUSES[i % ACTIVE_BUILD_STATUSES.length];
+		}
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
+	},
+};
 
-// Be sure to add an action for failing to accept consequences
-export const RunningWorkspaces: Story = {};
+export const RunningWorkspaces: Story = {
+	beforeEach: (ctx) => {
+		const { workspaces, seeds } = createPatchedDependencies(3);
+		for (const ws of workspaces) {
+			const writable = ws.latest_build as Writeable<WorkspaceBuild>;
+			writable.status = "running";
+		}
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries: seeds };
+	},
+	play: async () => {
+		// Can't use canvasElement from the play function's context because the
+		// component node uses React Portals and won't be part of the main
+		// canvas body
+		const modal = within(
+			screen.getByRole("dialog", { name: "Review updates" }),
+		);
+
+		const updateButton = modal.getByRole("button", { name: "Update" });
+		await userEvent.click(updateButton, {
+			/**
+			 * @todo 2025-07-15 - Something in the test setup is causing the
+			 * Update button to get treated as though it should opt out of
+			 * pointer events, which causes userEvent to break. All of our code
+			 * seems to be fine - we do have logic to disable pointer events,
+			 * but only when the button is obviously configured wrong (e.g.,
+			 * it's configured as a link but has no URL).
+			 *
+			 * Disabling this check makes things work again, but shoots our
+			 * confidence for how accessible the UI is, even if we know that at
+			 * this point, the button exists, has the right text content, and is
+			 * not disabled.
+			 *
+			 * We should aim to remove this property as soon as possible,
+			 * opening up an issue upstream if necessary.
+			 */
+			pointerEventsCheck: 0,
+		});
+		await modal.findByText("Please acknowledge consequences to continue.");
+
+		const checkbox = modal.getByRole("checkbox", {
+			name: /I acknowledge these consequences\./,
+		});
+		expect(checkbox).toHaveFocus();
+	},
+};
 
 export const MixOfWorkspaces: Story = {};
-
-export const TriggeredVerticalOverflow: Story = {};
-
-export const NoWorkspacesToUpdate: Story = {};

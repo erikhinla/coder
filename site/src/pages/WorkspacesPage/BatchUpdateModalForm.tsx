@@ -324,7 +324,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 		return (
 			<Container>
 				<ContainerBody
-					headerText="All workspaces up to date"
+					headerText={
+						workspacesToUpdate.length === 0
+							? "No workspaces selected"
+							: "All workspaces up to date"
+					}
 					description="No updates needed"
 					showDescription
 				>
