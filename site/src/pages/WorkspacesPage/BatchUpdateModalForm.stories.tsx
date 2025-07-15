@@ -1,20 +1,13 @@
-import type {
-	Meta,
-	ReactRenderer,
-	StoryContext,
-	StoryObj,
-} from "@storybook/react";
-import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
-import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
-import { QueryKey, QueryOptions, useQueryClient } from "react-query";
+import type { Meta, StoryContext, StoryObj } from "@storybook/react";
 import { templateVersionRoot } from "api/queries/templates";
 import type { TemplateVersion, Workspace } from "api/typesGenerated";
-import { ComponentProps } from "react";
+import type { ComponentProps } from "react";
+import { useQueryClient } from "react-query";
 import { QueryParameterSeed, queryParametersKey } from "testHelpers/chromatic";
+import { MockTemplateVersion, MockWorkspace } from "testHelpers/entities";
+import { BatchUpdateModalForm } from "./BatchUpdateModalForm";
 
 type Writeable<T> = { -readonly [Key in keyof T]: T[Key] };
-
-const templateVersionsKey = "_templateVersions";
 
 const meta: Meta<typeof BatchUpdateModalForm> = {
 	title: "pages/WorkspacesPage/BatchUpdateModalForm",

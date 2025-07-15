@@ -365,16 +365,18 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			.map((ws) => ws.id),
 	);
 
-	const failedValidationId = `${hookId}-failed-validation`;
 	const hasRunningWorkspaces = runningIds.size > 0;
 	const consequencesResolved = !hasRunningWorkspaces || stage === "accepted";
+	const failedValidationId =
+		stage === "failedValidation" ? `${hookId}-failed-validation` : undefined;
 
-	// For UX/accessibility reasons, we're splitting hairs between whether a
-	// form submission seems valid, versus whether clicking the button will give
-	// the user useful results/feedback. If we do a blanket disable for the
-	// button, there's many cases where there's no way to give the user feedback
-	// on how to get themselves unstuck.
-	const submitButtonDisabled = isProcessing || transitioningIds.size > 0;
+	// For UX/accessibility reasons, we're splitting a lot of hairs between
+	// various invalid/disabled states. We do not just want to throw a blanket
+	// `disabled` attribute on a button and call it a day. The most important
+	// thing is that we need to give the user feedback on how to get unstuck if
+	// they fail any input validations
+	const safeToSubmit = transitioningIds.size === 0 && error === undefined;
+	const buttonIsDisabled = !safeToSubmit || isProcessing;
 	const submitIsValid =
 		consequencesResolved && error === undefined && readyToUpdate.length > 0;
 
@@ -522,12 +524,10 @@ const ReviewForm: FC<ReviewFormProps> = ({
 						<Button
 							variant="default"
 							type="submit"
-							disabled={submitButtonDisabled}
-							aria-describedby={
-								stage === "failedValidation" ? failedValidationId : undefined
-							}
+							disabled={buttonIsDisabled}
+							aria-describedby={failedValidationId}
 						>
-							{submitButtonDisabled && (
+							{isProcessing && (
 								<>
 									<Spinner loading />
 									<span className="sr-only">
@@ -535,7 +535,14 @@ const ReviewForm: FC<ReviewFormProps> = ({
 									</span>
 								</>
 							)}
-							<span aria-hidden={submitButtonDisabled}>Update</span>
+
+							{!safeToSubmit && !isProcessing && (
+								<span className="sr-only">
+									Unable to complete batch update because of workspace error
+								</span>
+							)}
+
+							<span aria-hidden={buttonIsDisabled}>Update</span>
 						</Button>
 					</div>
 
