@@ -318,7 +318,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 	// if any of the queries actively have an error
 	const error = templateVersionQueries.find((q) => q.isError)?.error;
 
-	const formIsNeeded = readyToUpdate.length > 0 || dormant.length > 0;
+	const someWorkspacesCanBeUpdated = readyToUpdate.length > 0;
+	const formIsNeeded = someWorkspacesCanBeUpdated || dormant.length > 0;
 	if (!formIsNeeded) {
 		return (
 			<Container>
@@ -385,6 +386,10 @@ const ReviewForm: FC<ReviewFormProps> = ({
 			<form
 				onSubmit={(e) => {
 					e.preventDefault();
+					if (!someWorkspacesCanBeUpdated) {
+						onCancel();
+						return;
+					}
 					if (submitIsValid) {
 						onSubmit();
 						return;
@@ -492,8 +497,8 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								description={
 									<>
 										Dormant workspaces cannot be updated without first
-										activating the workspace. They will be skipped during the
-										batch update.
+										activating the workspace. They will always be skipped during
+										batch updates.
 									</>
 								}
 							>
@@ -542,7 +547,11 @@ const ReviewForm: FC<ReviewFormProps> = ({
 								</span>
 							)}
 
-							<span aria-hidden={buttonIsDisabled}>Update</span>
+							{someWorkspacesCanBeUpdated ? (
+								<span aria-hidden={buttonIsDisabled}>Update</span>
+							) : (
+								"Close"
+							)}
 						</Button>
 					</div>
 

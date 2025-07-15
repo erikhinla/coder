@@ -16,10 +16,10 @@ const meta: Meta<typeof BatchUpdateModalForm> = {
 		open: true,
 		isProcessing: false,
 		onSubmit: () => window.alert("Hooray! Everything has been submitted"),
-		// Not adding logic here, because Radix will make the callback fire
-		// every time you click outside the main region. That gets really
-		// annoying when working with the Story in the Storybook UI
-		onCancel: () => {},
+		// Since we're using Radix, any cancel functionality is also going to
+		// trigger when you click outside the component bounds, which would make
+		// doing an alert really annoying in the Storybook web UI
+		onCancel: () => console.log("Canceled"),
 	},
 };
 
@@ -94,9 +94,6 @@ export const CurrentlyProcessing: Story = {
 	},
 };
 
-/**
- * @todo This story is correct, but the component output is wrong
- */
 export const OnlyDormantWorkspaces: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, seeds } = createPatchedDependencies(3);
