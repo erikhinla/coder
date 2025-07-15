@@ -405,115 +405,113 @@ const ReviewForm: FC<ReviewFormProps> = ({
 					headerText="Review updates"
 					description="The following workspaces will be updated:"
 				>
-					{error !== undefined ? (
-						<ErrorAlert error={error} />
-					) : (
-						<>
-							{hasRunningWorkspaces && (
-								<RunningWorkspacesWarning
-									checkboxRef={consequencesCheckboxRef}
-									containerRef={consequencesContainerRef}
-									acceptedConsequences={stage === "accepted"}
-									onAcceptedConsequencesChange={(newChecked) => {
-										if (newChecked) {
-											setStage("accepted");
-										} else {
-											setStage("notAccepted");
-										}
-									}}
-								/>
-							)}
+					<div className="flex flex-col gap-4">
+						{error !== undefined && <ErrorAlert error={error} />}
 
-							{readyToUpdate.length > 0 && (
-								<WorkspacesListSection
-									headerText="Ready to update"
-									description="These workspaces will have their templates be updated to the latest version."
-								>
-									{readyToUpdate.map((ws) => {
-										const matchedQuery = templateVersionQueries.find(
-											(q) => q.data?.id === ws.template_active_version_id,
-										);
-										const newTemplateName = matchedQuery?.data?.name;
-
-										return (
-											<li
-												key={ws.id}
-												className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-											>
-												<ReviewPanel
-													className="border-none"
-													running={runningIds.has(ws.id)}
-													transitioning={transitioningIds.has(ws.id)}
-													workspaceName={ws.name}
-													workspaceIconUrl={ws.template_icon}
-													label={
-														newTemplateName !== undefined && (
-															<TemplateNameChange
-																newTemplateVersionName={newTemplateName}
-																oldTemplateVersionName={
-																	ws.latest_build.template_version_name
-																}
-															/>
-														)
-													}
-												/>
-											</li>
-										);
-									})}
-								</WorkspacesListSection>
-							)}
-
-							{noUpdateNeeded.length > 0 && (
-								<WorkspacesListSection
-									headerText="Already updated"
-									description="These workspaces are already updated and will be skipped."
-								>
-									{noUpdateNeeded.map((ws) => (
-										<li
-											key={ws.id}
-											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
-										>
-											<ReviewPanel
-												className="border-none"
-												running={false}
-												transitioning={transitioningIds.has(ws.id)}
-												workspaceName={ws.name}
-												workspaceIconUrl={ws.template_icon}
-											/>
-										</li>
-									))}
-								</WorkspacesListSection>
-							)}
-
-							{dormant.length > 0 && (
-								<WorkspacesListSection
-									headerText="Dormant workspaces"
-									description={
-										<>
-											Dormant workspaces cannot be updated without first
-											activating the workspace. They will be skipped during the
-											batch update.
-										</>
+						{hasRunningWorkspaces && (
+							<RunningWorkspacesWarning
+								checkboxRef={consequencesCheckboxRef}
+								containerRef={consequencesContainerRef}
+								acceptedConsequences={stage === "accepted"}
+								onAcceptedConsequencesChange={(newChecked) => {
+									if (newChecked) {
+										setStage("accepted");
+									} else {
+										setStage("notAccepted");
 									}
-								>
-									{dormant.map((ws) => (
+								}}
+							/>
+						)}
+
+						{readyToUpdate.length > 0 && (
+							<WorkspacesListSection
+								headerText="Ready to update"
+								description="These workspaces will have their templates be updated to the latest version."
+							>
+								{readyToUpdate.map((ws) => {
+									const matchedQuery = templateVersionQueries.find(
+										(q) => q.data?.id === ws.template_active_version_id,
+									);
+									const newTemplateName = matchedQuery?.data?.name;
+
+									return (
 										<li
 											key={ws.id}
 											className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
 										>
 											<ReviewPanel
 												className="border-none"
-												running={false}
+												running={runningIds.has(ws.id)}
 												transitioning={transitioningIds.has(ws.id)}
 												workspaceName={ws.name}
 												workspaceIconUrl={ws.template_icon}
+												label={
+													newTemplateName !== undefined && (
+														<TemplateNameChange
+															newTemplateVersionName={newTemplateName}
+															oldTemplateVersionName={
+																ws.latest_build.template_version_name
+															}
+														/>
+													)
+												}
 											/>
 										</li>
-									))}
-								</WorkspacesListSection>
-							)}
-						</>
-					)}
+									);
+								})}
+							</WorkspacesListSection>
+						)}
+
+						{noUpdateNeeded.length > 0 && (
+							<WorkspacesListSection
+								headerText="Already updated"
+								description="These workspaces are already updated and will be skipped."
+							>
+								{noUpdateNeeded.map((ws) => (
+									<li
+										key={ws.id}
+										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+									>
+										<ReviewPanel
+											className="border-none"
+											running={false}
+											transitioning={transitioningIds.has(ws.id)}
+											workspaceName={ws.name}
+											workspaceIconUrl={ws.template_icon}
+										/>
+									</li>
+								))}
+							</WorkspacesListSection>
+						)}
+
+						{dormant.length > 0 && (
+							<WorkspacesListSection
+								headerText="Dormant workspaces"
+								description={
+									<>
+										Dormant workspaces cannot be updated without first
+										activating the workspace. They will be skipped during the
+										batch update.
+									</>
+								}
+							>
+								{dormant.map((ws) => (
+									<li
+										key={ws.id}
+										className="[&:not(:last-child)]:border-b-border [&:not(:last-child)]:border-b [&:not(:last-child)]:border-solid border-0"
+									>
+										<ReviewPanel
+											className="border-none"
+											running={false}
+											transitioning={transitioningIds.has(ws.id)}
+											workspaceName={ws.name}
+											workspaceIconUrl={ws.template_icon}
+										/>
+									</li>
+								))}
+							</WorkspacesListSection>
+						)}
+					</div>
 				</ContainerBody>
 
 				<ContainerFooter>
