@@ -320,6 +320,7 @@ const ReviewForm: FC<ReviewFormProps> = ({
 
 	const hasWorkspaces = workspacesToUpdate.length > 0;
 	const someWorkspacesCanBeUpdated = readyToUpdate.length > 0;
+
 	const formIsNeeded = someWorkspacesCanBeUpdated || dormant.length > 0;
 	if (!formIsNeeded) {
 		return (

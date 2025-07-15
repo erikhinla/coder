@@ -12,6 +12,9 @@ import { ACTIVE_BUILD_STATUSES } from "./WorkspacesPage";
 import { expect, screen, userEvent, within } from "@storybook/test";
 
 type Writeable<T> = { -readonly [Key in keyof T]: T[Key] };
+type MutableWorkspace = Writeable<Omit<Workspace, "latest_build">> & {
+	latest_build: Writeable<WorkspaceBuild>;
+};
 
 const meta: Meta<typeof BatchUpdateModalForm> = {
 	title: "pages/WorkspacesPage/BatchUpdateModalForm",
@@ -52,6 +55,7 @@ function createPatchedDependencies(size: number): PatchedDependencies {
 			outdated: true,
 			id: `${MockWorkspace.id}-${i}`,
 			template_active_version_id: patchedTemplateVersion.id,
+			name: `${MockWorkspace.name}-${i}`,
 
 			latest_build: {
 				...MockWorkspace.latest_build,
@@ -87,7 +91,7 @@ export const NoWorkspacesToUpdate: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, queries } = createPatchedDependencies(3);
 		for (const ws of workspaces) {
-			const writable = ws as Writeable<Workspace>;
+			const writable = ws as MutableWorkspace;
 			writable.outdated = false;
 		}
 
@@ -114,7 +118,7 @@ export const OnlyDormantWorkspaces: Story = {
 	beforeEach: (ctx) => {
 		const { workspaces, queries } = createPatchedDependencies(3);
 		for (const ws of workspaces) {
-			const writable = ws as Writeable<Workspace>;
+			const writable = ws as MutableWorkspace;
 			writable.dormant_at = new Date().toISOString();
 		}
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
@@ -224,4 +228,49 @@ export const RunningWorkspacesFailedValidation: Story = {
 	},
 };
 
-export const MixOfWorkspaces: Story = {};
+export const MixOfWorkspaces: Story = {
+	/**
+	 * List of all workspace kinds we're trying to represent here:
+	 * - Ready to update + stopped
+	 * - Ready to update + running
+	 * - Ready to update + transitioning
+	 * - Dormant
+	 * - Not outdated + stopped
+	 * - Not outdated + transitioning
+	 *
+	 * Deliberately omitted:
+	 * - Not outdated + running (the update logic should skip the workspace, so
+	 *   you shouldn't care whether it's running)
+	 */
+	beforeEach: (ctx) => {
+		const { workspaces, queries } = createPatchedDependencies(6);
+
+		const readyToUpdateStopped = workspaces[0] as MutableWorkspace;
+		readyToUpdateStopped.outdated = true;
+		readyToUpdateStopped.latest_build.status = "stopped";
+
+		const readyToUpdateRunning = workspaces[1] as MutableWorkspace;
+		readyToUpdateRunning.outdated = true;
+		readyToUpdateRunning.latest_build.status = "running";
+
+		const readyToUpdateTransitioning = workspaces[2] as MutableWorkspace;
+		readyToUpdateTransitioning.outdated = true;
+		readyToUpdateTransitioning.latest_build.status = "starting";
+
+		const dormant = workspaces[3] as MutableWorkspace;
+		dormant.outdated = true;
+		dormant.latest_build.status = "stopped";
+		dormant.dormant_at = new Date().toISOString();
+
+		const noUpdatesNeededStopped = workspaces[4] as MutableWorkspace;
+		noUpdatesNeededStopped.outdated = false;
+		dormant.latest_build.status = "stopped";
+
+		const noUpdatesNeededTransitioning = workspaces[5] as MutableWorkspace;
+		noUpdatesNeededTransitioning.outdated = false;
+		noUpdatesNeededTransitioning.latest_build.status = "starting";
+
+		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
+		ctx.parameters = { ...ctx.parameters, queries };
+	},
+};
