@@ -8,15 +8,39 @@ import type { TemplateVersion, Workspace } from "api/typesGenerated";
 const meta: Meta<typeof BatchUpdateModalForm> = {
 	title: "pages/WorkspacesPage/BatchUpdateModalForm",
 	component: BatchUpdateModalForm,
+
 	args: {
-		// There's no point in having stories with the modal not open
 		open: true,
+		isProcessing: false,
+		onSubmit: () => window.alert("Hooray! Everything has been submitted"),
 		// Not adding logic here, because Radix will make the callback fire
 		// every time you click outside the main region. That gets really
 		// annoying when working with the Story in the Storybook UI
 		onCancel: () => {},
-		onSubmit: () => window.alert("Hooray! Everything has been submitted"),
 	},
+
+	decorators: [
+		// This decorator is intended to be attached to each story, to make sure
+		// that data-fetching dependencies are properly seeded. But it won't
+		// work by itself. Each story must properly initialize all `args`, and
+		// embed relevant template versions via `ctx.parameters`. Probably the
+		// easiest way to do that is via each story's `beforeEach` function
+		(Story, ctx) => {
+			const queryClient = useQueryClient();
+			const versions = ctx.parameters
+				._templateVersions as readonly TemplateVersion[];
+
+			for (const ws of ctx.args.workspacesToUpdate) {
+				const v = versions.find((v) => v.id === ws.template_active_version_id);
+				queryClient.setQueryData(
+					[templateVersionRoot, ws.template_active_version_id],
+					v,
+				);
+			}
+
+			return <Story />;
+		},
+	],
 };
 
 export default meta;
@@ -29,10 +53,7 @@ export const NoWorkspacesSelected: Story = {
 };
 
 export const CurrentlyProcessing: Story = {
-	args: {
-		isProcessing: true,
-	},
-
+	args: { isProcessing: true },
 	beforeEach: (ctx) => {
 		const workspaces: Workspace[] = [];
 		const templateVersions: TemplateVersion[] = [];
@@ -61,26 +82,8 @@ export const CurrentlyProcessing: Story = {
 		}
 
 		ctx.args = { ...ctx.args, workspacesToUpdate: workspaces };
-		ctx.parameters = { ...ctx.parameters, templateVersions };
+		ctx.parameters = { ...ctx.parameters, _templateVersions: templateVersions };
 	},
-
-	decorators: [
-		(Story, ctx) => {
-			const queryClient = useQueryClient();
-			const versions = ctx.parameters
-				.templateVersions as readonly TemplateVersion[];
-
-			for (const ws of ctx.args.workspacesToUpdate) {
-				const v = versions.find((v) => v.id === ws.template_active_version_id);
-				queryClient.setQueryData(
-					[templateVersionRoot, ws.template_active_version_id],
-					v,
-				);
-			}
-
-			return <Story />;
-		},
-	],
 };
 
 export const OnlyDormantWorkspaces: Story = {};
