@@ -26,7 +26,7 @@ import { TableLoader } from "components/TableLoader/TableLoader";
 import { CopyIcon } from "lucide-react";
 import { ChevronLeftIcon } from "lucide-react";
 import { type FC, useState } from "react";
-import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router";
 import { createDayString } from "utils/createDayString";
 import { OAuth2AppForm } from "./OAuth2AppForm";
 
@@ -141,6 +141,7 @@ export const EditOAuth2AppPageView: FC<EditOAuth2AppProps> = ({
 							confirmLoading={mutatingResource.deleteApp}
 							name={app.name}
 							entity="OAuth2 application"
+							info="Deleting this OAuth2 application will immediately invalidate all active sessions and API keys associated with it. Users currently authenticated through this application will be logged out and need to re-authenticate."
 							onConfirm={() => deleteApp(app.name)}
 							onCancel={() => setShowDelete(false)}
 						/>

@@ -34,12 +34,12 @@ jobs:
       tailnet-integration: ${{ steps.filter.outputs.tailnet-integration }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
       # For pull requests it's not necessary to checkout the code
@@ -121,7 +121,7 @@ jobs:
   #   runs-on: ${{ github.repository_owner == 'coder' && 'depot-ubuntu-22.04-8' || 'ubuntu-latest' }}
   #   steps:
   #     - name: Checkout
-  #       uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+  #       uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
   #       with:
   #         fetch-depth: 1
   #         # See: https://github.com/stefanzweifel/git-auto-commit-action?tab=readme-ov-file#commits-made-by-this-action-do-not-trigger-new-workflow-runs
@@ -154,12 +154,12 @@ jobs:
     runs-on: ${{ github.repository_owner == 'coder' && 'depot-ubuntu-22.04-8' || 'ubuntu-latest' }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -177,7 +177,7 @@ jobs:
           echo "LINT_CACHE_DIR=$dir" >> $GITHUB_ENV
 
       - name: golangci-lint cache
-        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
         with:
           path: |
             ${{ env.LINT_CACHE_DIR }}
@@ -187,7 +187,7 @@ jobs:
 
       # Check for any typos
       - name: Check for typos
-        uses: crate-ci/typos@b1ae8d918b6e85bd611117d3d9a3be4f903ee5e4 # v1.33.1
+        uses: crate-ci/typos@52bd719c2c91f9d676e2aa359fc8e0db8925e6d8 # v1.35.3
         with:
           config: .github/workflows/typos.toml
 
@@ -226,12 +226,12 @@ jobs:
     if: ${{ !cancelled() }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -256,8 +256,8 @@ jobs:
           pushd /tmp/proto
           curl -L -o protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v23.4/protoc-23.4-linux-x86_64.zip
           unzip protoc.zip
-          cp -r ./bin/* /usr/local/bin
-          cp -r ./include /usr/local/bin/include
+          sudo cp -r ./bin/* /usr/local/bin
+          sudo cp -r ./include /usr/local/bin/include
           popd
 
       - name: make gen
@@ -281,12 +281,12 @@ jobs:
     timeout-minutes: 7
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -311,94 +311,6 @@ jobs:
       - name: Check for unstaged files
         run: ./scripts/check_unstaged.sh
 
-  test-go:
-    runs-on: ${{ matrix.os == 'ubuntu-latest' && github.repository_owner == 'coder' && 'depot-ubuntu-22.04-4' || matrix.os == 'macos-latest' && github.repository_owner == 'coder' && 'depot-macos-latest' || matrix.os == 'windows-2022' && github.repository_owner == 'coder' && 'depot-windows-2022-16' || matrix.os }}
-    needs: changes
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci == 'true' || github.ref == 'refs/heads/main'
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-2022
-    steps:
-      - name: Harden Runner
-        # Harden Runner is only supported on Ubuntu runners.
-        if: runner.os == 'Linux'
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
-        with:
-          egress-policy: audit
-
-      # Set up RAM disks to speed up the rest of the job. This action is in
-      # a separate repository to allow its use before actions/checkout.
-      - name: Setup RAM Disks
-        if: runner.os == 'Windows'
-        uses: coder/setup-ramdisk-action@e1100847ab2d7bcd9d14bcda8f2d1b0f07b36f1b
-
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 1
-
-      - name: Setup Go Paths
-        uses: ./.github/actions/setup-go-paths
-
-      - name: Setup Go
-        uses: ./.github/actions/setup-go
-        with:
-          # Runners have Go baked-in and Go will automatically
-          # download the toolchain configured in go.mod, so we don't
-          # need to reinstall it. It's faster on Windows runners.
-          use-preinstalled-go: ${{ runner.os == 'Windows' }}
-
-      - name: Setup Terraform
-        uses: ./.github/actions/setup-tf
-
-      - name: Download Test Cache
-        id: download-cache
-        uses: ./.github/actions/test-cache/download
-        with:
-          key-prefix: test-go-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Test with Mock Database
-        id: test
-        shell: bash
-        run: |
-          # if macOS, install google-chrome for scaletests. As another concern,
-          # should we really have this kind of external dependency requirement
-          # on standard CI?
-          if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            brew install google-chrome
-          fi
-
-          # By default Go will use the number of logical CPUs, which
-          # is a fine default.
-          PARALLEL_FLAG=""
-
-          # macOS will output "The default interactive shell is now zsh"
-          # intermittently in CI...
-          if [ "${{ matrix.os }}" == "macos-latest" ]; then
-            touch ~/.bash_profile && echo "export BASH_SILENCE_DEPRECATION_WARNING=1" >> ~/.bash_profile
-          fi
-          export TS_DEBUG_DISCO=true
-          gotestsum --junitfile="gotests.xml" --jsonfile="gotests.json" --rerun-fails=2 \
-            --packages="./..." -- $PARALLEL_FLAG -short
-
-      - name: Upload Test Cache
-        uses: ./.github/actions/test-cache/upload
-        with:
-          cache-key: ${{ steps.download-cache.outputs.cache-key }}
-
-      - name: Upload test stats to Datadog
-        timeout-minutes: 1
-        continue-on-error: true
-        uses: ./.github/actions/upload-datadog
-        if: success() || failure()
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-
   test-go-pg:
     # make sure to adjust NUM_PARALLEL_PACKAGES and NUM_PARALLEL_TESTS below
     # when changing runner sizes
@@ -418,7 +330,7 @@ jobs:
           - windows-2022
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
@@ -428,6 +340,11 @@ jobs:
       - name: Disable Spotlight Indexing
         if: runner.os == 'macOS'
         run: |
+          enabled=$(sudo mdutil -a -s | grep "Indexing enabled" | wc -l)
+          if [ $enabled -eq 0 ]; then
+            echo "Spotlight indexing is already disabled"
+            exit 0
+          fi
           sudo mdutil -a -i off
           sudo mdutil -X /
           sudo launchctl bootout system /System/Library/LaunchDaemons/com.apple.metadata.mds.plist
@@ -439,7 +356,7 @@ jobs:
         uses: coder/setup-ramdisk-action@e1100847ab2d7bcd9d14bcda8f2d1b0f07b36f1b
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -473,6 +390,17 @@ jobs:
         with:
           key-prefix: test-go-pg-${{ runner.os }}-${{ runner.arch }}
 
+      - name: Setup Embedded Postgres Cache Paths
+        id: embedded-pg-cache
+        uses: ./.github/actions/setup-embedded-pg-cache-paths
+
+      - name: Download Embedded Postgres Cache
+        id: download-embedded-pg-cache
+        uses: ./.github/actions/embedded-pg-cache/download
+        with:
+          key-prefix: embedded-pg-${{ runner.os }}-${{ runner.arch }}
+          cache-path: ${{ steps.embedded-pg-cache.outputs.cached-dirs }}
+
       - name: Normalize File and Directory Timestamps
         shell: bash
         # Normalize file modification timestamps so that go test can use the
@@ -497,12 +425,12 @@ jobs:
             # Create a temp dir on the R: ramdisk drive for Windows. The default
             # C: drive is extremely slow: https://github.com/actions/runner-images/issues/8755
             mkdir -p "R:/temp/embedded-pg"
-            go run scripts/embedded-pg/main.go -path "R:/temp/embedded-pg"
+            go run scripts/embedded-pg/main.go -path "R:/temp/embedded-pg" -cache "${EMBEDDED_PG_CACHE_DIR}"
           elif [ "${{ runner.os }}" == "macOS" ]; then
             # Postgres runs faster on a ramdisk on macOS too
             mkdir -p /tmp/tmpfs
             sudo mount_tmpfs -o noowners -s 8g /tmp/tmpfs
-            go run scripts/embedded-pg/main.go -path /tmp/tmpfs/embedded-pg
+            go run scripts/embedded-pg/main.go -path /tmp/tmpfs/embedded-pg -cache "${EMBEDDED_PG_CACHE_DIR}"
           elif [ "${{ runner.os }}" == "Linux" ]; then
             make test-postgres-docker
           fi
@@ -528,16 +456,21 @@ jobs:
             # Postgres tends not to choke.
             NUM_PARALLEL_PACKAGES=8
             NUM_PARALLEL_TESTS=16
+            # Only the CLI and Agent are officially supported on Windows and the rest are too flaky
+            PACKAGES="./cli/... ./enterprise/cli/... ./agent/..."
           elif [ "${{ runner.os }}" == "macOS" ]; then
             # Our macOS runners have 8 cores. We set NUM_PARALLEL_TESTS to 16
             # because the tests complete faster and Postgres doesn't choke. It seems
             # that macOS's tmpfs is faster than the one on Windows.
             NUM_PARALLEL_PACKAGES=8
             NUM_PARALLEL_TESTS=16
+            # Only the CLI and Agent are officially supported on macOS and the rest are too flaky
+            PACKAGES="./cli/... ./enterprise/cli/... ./agent/..."
           elif [ "${{ runner.os }}" == "Linux" ]; then
             # Our Linux runners have 8 cores.
             NUM_PARALLEL_PACKAGES=8
             NUM_PARALLEL_TESTS=8
+            PACKAGES="./..."
           fi
 
           # by default, run tests with cache
@@ -554,11 +487,14 @@ jobs:
           # invalidated. See scripts/normalize_path.sh for more details.
           normalize_path_with_symlinks "$RUNNER_TEMP/sym" "$(dirname $(which terraform))"
 
-          # We rerun failing tests to counteract flakiness coming from Postgres
-          # choking on macOS and Windows sometimes.
-          DB=ci gotestsum --rerun-fails=2 --rerun-fails-max-failures=50 \
-            --format standard-quiet --packages "./..." \
+          gotestsum --format standard-quiet --packages "$PACKAGES" \
             -- -timeout=20m -v -p $NUM_PARALLEL_PACKAGES -parallel=$NUM_PARALLEL_TESTS $TESTCOUNT
+
+      - name: Upload failed test db dumps
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: failed-test-db-dump-${{matrix.os}}
+          path: "**/*.test.sql"
 
       - name: Upload Go Build Cache
         uses: ./.github/actions/test-cache/upload
@@ -570,6 +506,14 @@ jobs:
         uses: ./.github/actions/test-cache/upload
         with:
           cache-key: ${{ steps.download-cache.outputs.cache-key }}
+
+      - name: Upload Embedded Postgres Cache
+        uses: ./.github/actions/embedded-pg-cache/upload
+        # We only use the embedded Postgres cache on macOS and Windows runners.
+        if: runner.OS == 'macOS' || runner.OS == 'Windows'
+        with:
+          cache-key: ${{ steps.download-embedded-pg-cache.outputs.cache-key }}
+          cache-path: "${{ steps.embedded-pg-cache.outputs.embedded-pg-cache }}"
 
       - name: Upload test stats to Datadog
         timeout-minutes: 1
@@ -594,12 +538,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -619,7 +563,6 @@ jobs:
         env:
           POSTGRES_VERSION: "17"
           TS_DEBUG_DISCO: "true"
-          TEST_RETRIES: 2
         run: |
           make test-postgres
 
@@ -636,55 +579,6 @@ jobs:
         with:
           api-key: ${{ secrets.DATADOG_API_KEY }}
 
-  test-go-race:
-    runs-on: ${{ github.repository_owner == 'coder' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
-    needs: changes
-    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.ci == 'true' || github.ref == 'refs/heads/main'
-    timeout-minutes: 25
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 1
-
-      - name: Setup Go
-        uses: ./.github/actions/setup-go
-
-      - name: Setup Terraform
-        uses: ./.github/actions/setup-tf
-
-      - name: Download Test Cache
-        id: download-cache
-        uses: ./.github/actions/test-cache/download
-        with:
-          key-prefix: test-go-race-${{ runner.os }}-${{ runner.arch }}
-
-      # We run race tests with reduced parallelism because they use more CPU and we were finding
-      # instances where tests appear to hang for multiple seconds, resulting in flaky tests when
-      # short timeouts are used.
-      # c.f. discussion on https://github.com/coder/coder/pull/15106
-      - name: Run Tests
-        run: |
-          gotestsum --junitfile="gotests.xml" --packages="./..." --rerun-fails=2 --rerun-fails-abort-on-data-race -- -race -parallel 4 -p 4
-
-      - name: Upload Test Cache
-        uses: ./.github/actions/test-cache/upload
-        with:
-          cache-key: ${{ steps.download-cache.outputs.cache-key }}
-
-      - name: Upload test stats to Datadog
-        timeout-minutes: 1
-        continue-on-error: true
-        uses: ./.github/actions/upload-datadog
-        if: always()
-        with:
-          api-key: ${{ secrets.DATADOG_API_KEY }}
-
   test-go-race-pg:
     runs-on: ${{ github.repository_owner == 'coder' && 'depot-ubuntu-22.04-16' || 'ubuntu-latest' }}
     needs: changes
@@ -692,12 +586,12 @@ jobs:
     timeout-minutes: 25
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -722,7 +616,7 @@ jobs:
           POSTGRES_VERSION: "17"
         run: |
           make test-postgres-docker
-          DB=ci gotestsum --junitfile="gotests.xml" --packages="./..." --rerun-fails=2 --rerun-fails-abort-on-data-race -- -race -parallel 4 -p 4
+          gotestsum --junitfile="gotests.xml" --packages="./..." -- -race -parallel 4 -p 4
 
       - name: Upload Test Cache
         uses: ./.github/actions/test-cache/upload
@@ -751,12 +645,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -777,12 +671,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -809,12 +703,12 @@ jobs:
     name: ${{ matrix.variant.name }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
 
@@ -844,7 +738,6 @@ jobs:
         if: ${{ !matrix.variant.premium }}
         env:
           DEBUG: pw:api
-          CODER_E2E_TEST_RETRIES: 2
         working-directory: site
 
       # Run all of the tests with a premium license
@@ -854,7 +747,6 @@ jobs:
           DEBUG: pw:api
           CODER_E2E_LICENSE: ${{ secrets.CODER_E2E_LICENSE }}
           CODER_E2E_REQUIRE_PREMIUM_TESTS: "1"
-          CODER_E2E_TEST_RETRIES: 2
         working-directory: site
 
       - name: Upload Playwright Failed Tests
@@ -882,12 +774,12 @@ jobs:
     if: needs.changes.outputs.site == 'true' || needs.changes.outputs.ci == 'true'
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           # 👇 Ensures Chromatic can read your full git history
           fetch-depth: 0
@@ -902,7 +794,7 @@ jobs:
       # the check to pass. This is desired in PRs, but not in mainline.
       - name: Publish to Chromatic (non-mainline)
         if: github.ref != 'refs/heads/main' && github.repository_owner == 'coder'
-        uses: chromaui/action@c50adf8eaa8c2878af3263499a73077854de39d4 # v12.2.0
+        uses: chromaui/action@58d9ffb36c90c97a02d061544ecc849cc4a242a9 # v13.1.3
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
           STORYBOOK: true
@@ -934,7 +826,7 @@ jobs:
       # infinitely "in progress" in mainline unless we re-review each build.
       - name: Publish to Chromatic (mainline)
         if: github.ref == 'refs/heads/main' && github.repository_owner == 'coder'
-        uses: chromaui/action@c50adf8eaa8c2878af3263499a73077854de39d4 # v12.2.0
+        uses: chromaui/action@58d9ffb36c90c97a02d061544ecc849cc4a242a9 # v13.1.3
         env:
           NODE_OPTIONS: "--max_old_space_size=4096"
           STORYBOOK: true
@@ -962,12 +854,12 @@ jobs:
 
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           # 0 is required here for version.sh to work.
           fetch-depth: 0
@@ -983,8 +875,8 @@ jobs:
           pushd /tmp/proto
           curl -L -o protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v23.4/protoc-23.4-linux-x86_64.zip
           unzip protoc.zip
-          cp -r ./bin/* /usr/local/bin
-          cp -r ./include /usr/local/bin/include
+          sudo cp -r ./bin/* /usr/local/bin
+          sudo cp -r ./include /usr/local/bin/include
           popd
 
       - name: Setup Go
@@ -1018,9 +910,7 @@ jobs:
       - fmt
       - lint
       - gen
-      - test-go
       - test-go-pg
-      - test-go-race
       - test-go-race-pg
       - test-js
       - test-e2e
@@ -1031,7 +921,7 @@ jobs:
     if: always()
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
@@ -1041,9 +931,7 @@ jobs:
           echo "- fmt: ${{ needs.fmt.result }}"
           echo "- lint: ${{ needs.lint.result }}"
           echo "- gen: ${{ needs.gen.result }}"
-          echo "- test-go: ${{ needs.test-go.result }}"
           echo "- test-go-pg: ${{ needs.test-go-pg.result }}"
-          echo "- test-go-race: ${{ needs.test-go-race.result }}"
           echo "- test-go-race-pg: ${{ needs.test-go-race-pg.result }}"
           echo "- test-js: ${{ needs.test-js.result }}"
           echo "- test-e2e: ${{ needs.test-e2e.result }}"
@@ -1068,7 +956,7 @@ jobs:
     steps:
       # Harden Runner doesn't work on macOS
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
@@ -1082,7 +970,7 @@ jobs:
       - name: Switch XCode Version
         uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
         with:
-          xcode-version: "16.0.0"
+          xcode-version: "16.1.0"
 
       - name: Setup Go
         uses: ./.github/actions/setup-go
@@ -1161,17 +1049,17 @@ jobs:
       IMAGE: ghcr.io/coder/coder-preview:${{ steps.build-docker.outputs.tag }}
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
       - name: GHCR Login
-        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 # v3.5.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -1182,6 +1070,27 @@ jobs:
 
       - name: Setup Go
         uses: ./.github/actions/setup-go
+
+      - name: Install rcodesign
+        run: |
+          set -euo pipefail
+          wget -O /tmp/rcodesign.tar.gz https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F0.22.0/apple-codesign-0.22.0-x86_64-unknown-linux-musl.tar.gz
+          sudo tar -xzf /tmp/rcodesign.tar.gz \
+            -C /usr/bin \
+            --strip-components=1 \
+            apple-codesign-0.22.0-x86_64-unknown-linux-musl/rcodesign
+          rm /tmp/rcodesign.tar.gz
+
+      - name: Setup Apple Developer certificate
+        run: |
+          set -euo pipefail
+          touch /tmp/{apple_cert.p12,apple_cert_password.txt}
+          chmod 600 /tmp/{apple_cert.p12,apple_cert_password.txt}
+          echo "$AC_CERTIFICATE_P12_BASE64" | base64 -d > /tmp/apple_cert.p12
+          echo "$AC_CERTIFICATE_PASSWORD" > /tmp/apple_cert_password.txt
+        env:
+          AC_CERTIFICATE_P12_BASE64: ${{ secrets.AC_CERTIFICATE_P12_BASE64 }}
+          AC_CERTIFICATE_PASSWORD: ${{ secrets.AC_CERTIFICATE_PASSWORD }}
 
       # Necessary for signing Windows binaries.
       - name: Setup Java
@@ -1218,17 +1127,17 @@ jobs:
       # Setup GCloud for signing Windows binaries.
       - name: Authenticate to Google Cloud
         id: gcloud_auth
-        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2.1.12
         with:
-          workload_identity_provider: ${{ secrets.GCP_CODE_SIGNING_WORKLOAD_ID_PROVIDER }}
-          service_account: ${{ secrets.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ vars.GCP_CODE_SIGNING_WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ vars.GCP_CODE_SIGNING_SERVICE_ACCOUNT }}
           token_format: "access_token"
 
       - name: Setup GCloud SDK
-        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2.1.4
+        uses: google-github-actions/setup-gcloud@cb1e50a9932213ecece00a606661ae9ca44f3397 # v2.2.0
 
       - name: Download dylibs
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5.0.0
         with:
           name: dylibs
           path: ./build
@@ -1259,6 +1168,11 @@ jobs:
           # do (see above).
           CODER_SIGN_WINDOWS: "1"
           CODER_WINDOWS_RESOURCES: "1"
+          CODER_SIGN_GPG: "1"
+          CODER_GPG_RELEASE_KEY_BASE64: ${{ secrets.GPG_RELEASE_KEY_BASE64 }}
+          CODER_SIGN_DARWIN: "1"
+          AC_CERTIFICATE_FILE: /tmp/apple_cert.p12
+          AC_CERTIFICATE_PASSWORD_FILE: /tmp/apple_cert_password.txt
           EV_KEY: ${{ secrets.EV_KEY }}
           EV_KEYSTORE: ${{ secrets.EV_KEYSTORE }}
           EV_TSA_URL: ${{ secrets.EV_TSA_URL }}
@@ -1507,32 +1421,32 @@ jobs:
       id-token: write
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
       - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@ba79af03959ebeac9769e648f473a284504d9193 # v2.1.10
+        uses: google-github-actions/auth@b7593ed2efd1c1617e1b0254da33b86225adb2a5 # v2.1.12
         with:
-          workload_identity_provider: projects/573722524737/locations/global/workloadIdentityPools/github/providers/github
-          service_account: coder-ci@coder-dogfood.iam.gserviceaccount.com
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_ID_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@77e7a554d41e2ee56fc945c52dfd3f33d12def9a # v2.1.4
+        uses: google-github-actions/setup-gcloud@cb1e50a9932213ecece00a606661ae9ca44f3397 # v2.2.0
 
       - name: Set up Flux CLI
-        uses: fluxcd/flux2/action@a48f81a66c4ca9fbd993233ab99dd03a7cfbe09a # v2.6.2
+        uses: fluxcd/flux2/action@6bf37f6a560fd84982d67f853162e4b3c2235edb # v2.6.4
         with:
           # Keep this and the github action up to date with the version of flux installed in dogfood cluster
           version: "2.5.1"
 
       - name: Get Cluster Credentials
-        uses: google-github-actions/get-gke-credentials@d0cee45012069b163a631894b98904a9e6723729 # v2.3.3
+        uses: google-github-actions/get-gke-credentials@8e574c49425fa7efed1e74650a449bfa6a23308a # v2.3.4
         with:
           cluster_name: dogfood-v2
           location: us-central1-a
@@ -1571,12 +1485,12 @@ jobs:
     if: github.ref == 'refs/heads/main' && !github.event.pull_request.head.repo.fork
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 0
 
@@ -1606,12 +1520,12 @@ jobs:
     if: needs.changes.outputs.db == 'true' || needs.changes.outputs.ci == 'true' || github.ref == 'refs/heads/main'
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@002fdce3c6a235733a90a27c80493a3241e56863 # v2.12.1
+        uses: step-security/harden-runner@ec9f2d5744a09debf3a187a3f4f675c53b671911 # v2.13.0
         with:
           egress-policy: audit
 
       - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
         with:
           fetch-depth: 1
       # We need golang to run the migration main.go

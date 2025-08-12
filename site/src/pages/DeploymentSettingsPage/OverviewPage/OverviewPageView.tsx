@@ -1,6 +1,6 @@
 import type {
 	DAUsResponse,
-	Experiments,
+	Experiment,
 	SerpentOption,
 } from "api/typesGenerated";
 import { Link } from "components/Link/Link";
@@ -21,8 +21,8 @@ import { UserEngagementChart } from "./UserEngagementChart";
 type OverviewPageViewProps = {
 	deploymentOptions: SerpentOption[];
 	dailyActiveUsers: DAUsResponse | undefined;
-	readonly invalidExperiments: Experiments | string[];
-	readonly safeExperiments: Experiments | string[];
+	readonly invalidExperiments: readonly string[];
+	readonly safeExperiments: readonly Experiment[];
 };
 
 export const OverviewPageView: FC<OverviewPageViewProps> = ({

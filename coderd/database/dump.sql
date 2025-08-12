@@ -38,6 +38,8 @@ CREATE TYPE audit_action AS ENUM (
     'close'
 );
 
+COMMENT ON TYPE audit_action IS 'NOTE: `connect`, `disconnect`, `open`, and `close` are deprecated and no longer used - these events are now tracked in the connection_logs table.';
+
 CREATE TYPE automatic_updates AS ENUM (
     'always',
     'never'
@@ -49,7 +51,31 @@ CREATE TYPE build_reason AS ENUM (
     'autostop',
     'dormancy',
     'failedstop',
-    'autodelete'
+    'autodelete',
+    'dashboard',
+    'cli',
+    'ssh_connection',
+    'vscode_connection',
+    'jetbrains_connection'
+);
+
+CREATE TYPE connection_status AS ENUM (
+    'connected',
+    'disconnected'
+);
+
+CREATE TYPE connection_type AS ENUM (
+    'ssh',
+    'vscode',
+    'jetbrains',
+    'reconnecting_pty',
+    'workspace_app',
+    'port_forwarding'
+);
+
+CREATE TYPE cors_behavior AS ENUM (
+    'simple',
+    'passthru'
 );
 
 CREATE TYPE crypto_key_feature AS ENUM (
@@ -242,7 +268,8 @@ CREATE TYPE resource_type AS ENUM (
     'idp_sync_settings_group',
     'idp_sync_settings_role',
     'workspace_agent',
-    'workspace_app'
+    'workspace_app',
+    'prebuilds_settings'
 );
 
 CREATE TYPE startup_script_behavior AS ENUM (
@@ -324,7 +351,8 @@ CREATE TYPE workspace_app_open_in AS ENUM (
 CREATE TYPE workspace_app_status_state AS ENUM (
     'working',
     'complete',
-    'failure'
+    'failure',
+    'idle'
 );
 
 CREATE TYPE workspace_transition AS ENUM (
@@ -358,7 +386,8 @@ BEGIN
 	JOIN workspace_builds ON workspace_builds.job_id = workspace_resources.job_id
 	WHERE workspace_builds.id = workspace_build_id
 		AND workspace_agents.name = NEW.name
-		AND workspace_agents.id != NEW.id;
+		AND workspace_agents.id != NEW.id
+		AND workspace_agents.deleted = FALSE;  -- Ensure we only count non-deleted agents.
 
 	-- If there's already an agent with this name, raise an error
 	IF agents_with_name > 0 THEN
@@ -820,31 +849,38 @@ CREATE TABLE audit_logs (
     resource_icon text NOT NULL
 );
 
-CREATE TABLE chat_messages (
-    id bigint NOT NULL,
-    chat_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    model text NOT NULL,
-    provider text NOT NULL,
-    content jsonb NOT NULL
+CREATE TABLE connection_logs (
+    id uuid NOT NULL,
+    connect_time timestamp with time zone NOT NULL,
+    organization_id uuid NOT NULL,
+    workspace_owner_id uuid NOT NULL,
+    workspace_id uuid NOT NULL,
+    workspace_name text NOT NULL,
+    agent_name text NOT NULL,
+    type connection_type NOT NULL,
+    ip inet NOT NULL,
+    code integer,
+    user_agent text,
+    user_id uuid,
+    slug_or_port text,
+    connection_id uuid,
+    disconnect_time timestamp with time zone,
+    disconnect_reason text
 );
 
-CREATE SEQUENCE chat_messages_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
+COMMENT ON COLUMN connection_logs.code IS 'Either the HTTP status code of the web request, or the exit code of an SSH connection. For non-web connections, this is Null until we receive a disconnect event for the same connection_id.';
 
-ALTER SEQUENCE chat_messages_id_seq OWNED BY chat_messages.id;
+COMMENT ON COLUMN connection_logs.user_agent IS 'Null for SSH events. For web connections, this is the User-Agent header from the request.';
 
-CREATE TABLE chats (
-    id uuid DEFAULT gen_random_uuid() NOT NULL,
-    owner_id uuid NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    title text NOT NULL
-);
+COMMENT ON COLUMN connection_logs.user_id IS 'Null for SSH events. For web connections, this is the ID of the user that made the request.';
+
+COMMENT ON COLUMN connection_logs.slug_or_port IS 'Null for SSH events. For web connections, this is the slug of the app or the port number being forwarded.';
+
+COMMENT ON COLUMN connection_logs.connection_id IS 'The SSH connection ID. Used to correlate connections and disconnections. As it originates from the agent, it is not guaranteed to be unique.';
+
+COMMENT ON COLUMN connection_logs.disconnect_time IS 'The time the connection was closed. Null for web connections. For other connections, this is null until we receive a disconnect event for the same connection_id.';
+
+COMMENT ON COLUMN connection_logs.disconnect_reason IS 'The reason the connection was closed. Null for web connections. For other connections, this is null until we receive a disconnect event for the same connection_id.';
 
 CREATE TABLE crypto_keys (
     feature crypto_key_feature NOT NULL,
@@ -1128,10 +1164,19 @@ CREATE TABLE oauth2_provider_app_codes (
     secret_prefix bytea NOT NULL,
     hashed_secret bytea NOT NULL,
     user_id uuid NOT NULL,
-    app_id uuid NOT NULL
+    app_id uuid NOT NULL,
+    resource_uri text,
+    code_challenge text,
+    code_challenge_method text
 );
 
 COMMENT ON TABLE oauth2_provider_app_codes IS 'Codes are meant to be exchanged for access tokens.';
+
+COMMENT ON COLUMN oauth2_provider_app_codes.resource_uri IS 'RFC 8707 resource parameter for audience restriction';
+
+COMMENT ON COLUMN oauth2_provider_app_codes.code_challenge IS 'PKCE code challenge for public clients';
+
+COMMENT ON COLUMN oauth2_provider_app_codes.code_challenge_method IS 'PKCE challenge method (S256)';
 
 CREATE TABLE oauth2_provider_app_secrets (
     id uuid NOT NULL,
@@ -1152,10 +1197,16 @@ CREATE TABLE oauth2_provider_app_tokens (
     hash_prefix bytea NOT NULL,
     refresh_hash bytea NOT NULL,
     app_secret_id uuid NOT NULL,
-    api_key_id text NOT NULL
+    api_key_id text NOT NULL,
+    audience text,
+    user_id uuid NOT NULL
 );
 
 COMMENT ON COLUMN oauth2_provider_app_tokens.refresh_hash IS 'Refresh tokens provide a way to refresh an access token (API key). An expired API key can be refreshed if this token is not yet expired, meaning this expiry can outlive an API key.';
+
+COMMENT ON COLUMN oauth2_provider_app_tokens.audience IS 'Token audience binding from resource parameter';
+
+COMMENT ON COLUMN oauth2_provider_app_tokens.user_id IS 'Denormalized user ID for performance optimization in authorization checks';
 
 CREATE TABLE oauth2_provider_apps (
     id uuid NOT NULL,
@@ -1163,10 +1214,70 @@ CREATE TABLE oauth2_provider_apps (
     updated_at timestamp with time zone NOT NULL,
     name character varying(64) NOT NULL,
     icon character varying(256) NOT NULL,
-    callback_url text NOT NULL
+    callback_url text NOT NULL,
+    redirect_uris text[],
+    client_type text DEFAULT 'confidential'::text,
+    dynamically_registered boolean DEFAULT false,
+    client_id_issued_at timestamp with time zone DEFAULT now(),
+    client_secret_expires_at timestamp with time zone,
+    grant_types text[] DEFAULT '{authorization_code,refresh_token}'::text[],
+    response_types text[] DEFAULT '{code}'::text[],
+    token_endpoint_auth_method text DEFAULT 'client_secret_basic'::text,
+    scope text DEFAULT ''::text,
+    contacts text[],
+    client_uri text,
+    logo_uri text,
+    tos_uri text,
+    policy_uri text,
+    jwks_uri text,
+    jwks jsonb,
+    software_id text,
+    software_version text,
+    registration_access_token text,
+    registration_client_uri text
 );
 
 COMMENT ON TABLE oauth2_provider_apps IS 'A table used to configure apps that can use Coder as an OAuth2 provider, the reverse of what we are calling external authentication.';
+
+COMMENT ON COLUMN oauth2_provider_apps.redirect_uris IS 'List of valid redirect URIs for the application';
+
+COMMENT ON COLUMN oauth2_provider_apps.client_type IS 'OAuth2 client type: confidential or public';
+
+COMMENT ON COLUMN oauth2_provider_apps.dynamically_registered IS 'Whether this app was created via dynamic client registration';
+
+COMMENT ON COLUMN oauth2_provider_apps.client_id_issued_at IS 'RFC 7591: Timestamp when client_id was issued';
+
+COMMENT ON COLUMN oauth2_provider_apps.client_secret_expires_at IS 'RFC 7591: Timestamp when client_secret expires (null for non-expiring)';
+
+COMMENT ON COLUMN oauth2_provider_apps.grant_types IS 'RFC 7591: Array of grant types the client is allowed to use';
+
+COMMENT ON COLUMN oauth2_provider_apps.response_types IS 'RFC 7591: Array of response types the client supports';
+
+COMMENT ON COLUMN oauth2_provider_apps.token_endpoint_auth_method IS 'RFC 7591: Authentication method for token endpoint';
+
+COMMENT ON COLUMN oauth2_provider_apps.scope IS 'RFC 7591: Space-delimited scope values the client can request';
+
+COMMENT ON COLUMN oauth2_provider_apps.contacts IS 'RFC 7591: Array of email addresses for responsible parties';
+
+COMMENT ON COLUMN oauth2_provider_apps.client_uri IS 'RFC 7591: URL of the client home page';
+
+COMMENT ON COLUMN oauth2_provider_apps.logo_uri IS 'RFC 7591: URL of the client logo image';
+
+COMMENT ON COLUMN oauth2_provider_apps.tos_uri IS 'RFC 7591: URL of the client terms of service';
+
+COMMENT ON COLUMN oauth2_provider_apps.policy_uri IS 'RFC 7591: URL of the client privacy policy';
+
+COMMENT ON COLUMN oauth2_provider_apps.jwks_uri IS 'RFC 7591: URL of the client JSON Web Key Set';
+
+COMMENT ON COLUMN oauth2_provider_apps.jwks IS 'RFC 7591: JSON Web Key Set document value';
+
+COMMENT ON COLUMN oauth2_provider_apps.software_id IS 'RFC 7591: Identifier for the client software';
+
+COMMENT ON COLUMN oauth2_provider_apps.software_version IS 'RFC 7591: Version of the client software';
+
+COMMENT ON COLUMN oauth2_provider_apps.registration_access_token IS 'RFC 7592: Hashed registration access token for client management';
+
+COMMENT ON COLUMN oauth2_provider_apps.registration_client_uri IS 'RFC 7592: URI for client configuration endpoint';
 
 CREATE TABLE organizations (
     id uuid NOT NULL,
@@ -1308,10 +1419,17 @@ CASE
         WHEN (started_at IS NULL) THEN 'pending'::provisioner_job_status
         ELSE 'running'::provisioner_job_status
     END
-END) STORED NOT NULL
+END) STORED NOT NULL,
+    logs_length integer DEFAULT 0 NOT NULL,
+    logs_overflowed boolean DEFAULT false NOT NULL,
+    CONSTRAINT max_provisioner_logs_length CHECK ((logs_length <= 1048576))
 );
 
 COMMENT ON COLUMN provisioner_jobs.job_status IS 'Computed column to track the status of the job.';
+
+COMMENT ON COLUMN provisioner_jobs.logs_length IS 'Total length of provisioner logs';
+
+COMMENT ON COLUMN provisioner_jobs.logs_overflowed IS 'Whether the provisioner logs overflowed in length';
 
 CREATE TABLE provisioner_keys (
     id uuid NOT NULL,
@@ -1496,6 +1614,13 @@ CREATE TABLE template_version_preset_parameters (
     value text NOT NULL
 );
 
+CREATE TABLE template_version_preset_prebuild_schedules (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    preset_id uuid NOT NULL,
+    cron_expression text NOT NULL,
+    desired_instances integer NOT NULL
+);
+
 CREATE TABLE template_version_presets (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     template_version_id uuid NOT NULL,
@@ -1503,8 +1628,16 @@ CREATE TABLE template_version_presets (
     created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
     desired_instances integer,
     invalidate_after_secs integer DEFAULT 0,
-    prebuild_status prebuild_status DEFAULT 'healthy'::prebuild_status NOT NULL
+    prebuild_status prebuild_status DEFAULT 'healthy'::prebuild_status NOT NULL,
+    scheduling_timezone text DEFAULT ''::text NOT NULL,
+    is_default boolean DEFAULT false NOT NULL,
+    description character varying(128) DEFAULT ''::character varying NOT NULL,
+    icon character varying(256) DEFAULT ''::character varying NOT NULL
 );
+
+COMMENT ON COLUMN template_version_presets.description IS 'Short text describing the preset (max 128 characters).';
+
+COMMENT ON COLUMN template_version_presets.icon IS 'URL or path to an icon representing the preset (max 256 characters).';
 
 CREATE TABLE template_version_terraform_values (
     template_version_id uuid NOT NULL,
@@ -1629,7 +1762,8 @@ CREATE TABLE templates (
     deprecated text DEFAULT ''::text NOT NULL,
     activity_bump bigint DEFAULT '3600000000000'::bigint NOT NULL,
     max_port_sharing_level app_sharing_level DEFAULT 'owner'::app_sharing_level NOT NULL,
-    use_classic_parameter_flow boolean DEFAULT true NOT NULL
+    use_classic_parameter_flow boolean DEFAULT false NOT NULL,
+    cors_behavior cors_behavior DEFAULT 'simple'::cors_behavior NOT NULL
 );
 
 COMMENT ON COLUMN templates.default_ttl IS 'The default duration for autostop for workspaces created from this template.';
@@ -1682,6 +1816,7 @@ CREATE VIEW template_with_names AS
     templates.activity_bump,
     templates.max_port_sharing_level,
     templates.use_classic_parameter_flow,
+    templates.cors_behavior,
     COALESCE(visible_users.avatar_url, ''::text) AS created_by_avatar_url,
     COALESCE(visible_users.username, ''::text) AS created_by_username,
     COALESCE(visible_users.name, ''::text) AS created_by_name,
@@ -1725,6 +1860,18 @@ COMMENT ON COLUMN user_links.oauth_access_token_key_id IS 'The ID of the key use
 COMMENT ON COLUMN user_links.oauth_refresh_token_key_id IS 'The ID of the key used to encrypt the OAuth refresh token. If this is NULL, the refresh token is not encrypted';
 
 COMMENT ON COLUMN user_links.claims IS 'Claims from the IDP for the linked user. Includes both id_token and userinfo claims. ';
+
+CREATE TABLE user_secrets (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    user_id uuid NOT NULL,
+    name text NOT NULL,
+    description text NOT NULL,
+    value text NOT NULL,
+    env_name text DEFAULT ''::text NOT NULL,
+    file_path text DEFAULT ''::text NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
 
 CREATE TABLE user_status_changes (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
@@ -1916,6 +2063,7 @@ CREATE TABLE workspace_agents (
     display_order integer DEFAULT 0 NOT NULL,
     parent_id uuid,
     api_key_scope agent_key_scope_enum DEFAULT 'all'::agent_key_scope_enum NOT NULL,
+    deleted boolean DEFAULT false NOT NULL,
     CONSTRAINT max_logs_length CHECK ((logs_length <= 1048576)),
     CONSTRAINT subsystems_not_none CHECK ((NOT ('none'::workspace_agent_subsystem = ANY (subsystems))))
 );
@@ -1943,6 +2091,8 @@ COMMENT ON COLUMN workspace_agents.ready_at IS 'The time the agent entered the r
 COMMENT ON COLUMN workspace_agents.display_order IS 'Specifies the order in which to display agents in user interfaces.';
 
 COMMENT ON COLUMN workspace_agents.api_key_scope IS 'Defines the scope of the API key associated with the agent. ''all'' allows access to everything, ''no_user_data'' restricts it to exclude user data.';
+
+COMMENT ON COLUMN workspace_agents.deleted IS 'Indicates whether or not the agent has been deleted. This is currently only applicable to sub agents.';
 
 CREATE UNLOGGED TABLE workspace_app_audit_sessions (
     agent_id uuid NOT NULL,
@@ -2085,7 +2235,9 @@ CREATE TABLE workspace_builds (
     max_deadline timestamp with time zone DEFAULT '0001-01-01 00:00:00+00'::timestamp with time zone NOT NULL,
     template_version_preset_id uuid,
     has_ai_task boolean,
-    ai_tasks_sidebar_app_id uuid
+    ai_task_sidebar_app_id uuid,
+    CONSTRAINT workspace_builds_ai_task_sidebar_app_id_required CHECK (((((has_ai_task IS NULL) OR (has_ai_task = false)) AND (ai_task_sidebar_app_id IS NULL)) OR ((has_ai_task = true) AND (ai_task_sidebar_app_id IS NOT NULL)))),
+    CONSTRAINT workspace_builds_deadline_below_max_deadline CHECK ((((deadline <> '0001-01-01 00:00:00+00'::timestamp with time zone) AND (deadline <= max_deadline)) OR (max_deadline = '0001-01-01 00:00:00+00'::timestamp with time zone)))
 );
 
 CREATE VIEW workspace_build_with_user AS
@@ -2105,7 +2257,7 @@ CREATE VIEW workspace_build_with_user AS
     workspace_builds.max_deadline,
     workspace_builds.template_version_preset_id,
     workspace_builds.has_ai_task,
-    workspace_builds.ai_tasks_sidebar_app_id,
+    workspace_builds.ai_task_sidebar_app_id,
     COALESCE(visible_users.avatar_url, ''::text) AS initiator_by_avatar_url,
     COALESCE(visible_users.username, ''::text) AS initiator_by_username,
     COALESCE(visible_users.name, ''::text) AS initiator_by_name
@@ -2130,7 +2282,9 @@ CREATE TABLE workspaces (
     deleting_at timestamp with time zone,
     automatic_updates automatic_updates DEFAULT 'never'::automatic_updates NOT NULL,
     favorite boolean DEFAULT false NOT NULL,
-    next_start_at timestamp with time zone
+    next_start_at timestamp with time zone,
+    group_acl jsonb DEFAULT '{}'::jsonb NOT NULL,
+    user_acl jsonb DEFAULT '{}'::jsonb NOT NULL
 );
 
 COMMENT ON COLUMN workspaces.favorite IS 'Favorite is true if the workspace owner has favorited the workspace.';
@@ -2216,7 +2370,7 @@ CREATE VIEW workspace_prebuilds AS
            FROM (((workspaces w
              JOIN workspace_latest_builds wlb ON ((wlb.workspace_id = w.id)))
              JOIN workspace_resources wr ON ((wr.job_id = wlb.job_id)))
-             JOIN workspace_agents wa ON ((wa.resource_id = wr.id)))
+             JOIN workspace_agents wa ON (((wa.resource_id = wr.id) AND (wa.deleted = false))))
           WHERE (w.owner_id = 'c42fdf75-3097-471c-8c33-fb52454d81c0'::uuid)
           GROUP BY w.id
         ), current_presets AS (
@@ -2309,6 +2463,8 @@ CREATE VIEW workspaces_expanded AS
     workspaces.automatic_updates,
     workspaces.favorite,
     workspaces.next_start_at,
+    workspaces.group_acl,
+    workspaces.user_acl,
     visible_users.avatar_url AS owner_avatar_url,
     visible_users.username AS owner_username,
     visible_users.name AS owner_name,
@@ -2326,8 +2482,6 @@ CREATE VIEW workspaces_expanded AS
      JOIN templates ON ((workspaces.template_id = templates.id)));
 
 COMMENT ON VIEW workspaces_expanded IS 'Joins in the display name information such as username, avatar, and organization name.';
-
-ALTER TABLE ONLY chat_messages ALTER COLUMN id SET DEFAULT nextval('chat_messages_id_seq'::regclass);
 
 ALTER TABLE ONLY licenses ALTER COLUMN id SET DEFAULT nextval('licenses_id_seq'::regclass);
 
@@ -2350,11 +2504,8 @@ ALTER TABLE ONLY api_keys
 ALTER TABLE ONLY audit_logs
     ADD CONSTRAINT audit_logs_pkey PRIMARY KEY (id);
 
-ALTER TABLE ONLY chat_messages
-    ADD CONSTRAINT chat_messages_pkey PRIMARY KEY (id);
-
-ALTER TABLE ONLY chats
-    ADD CONSTRAINT chats_pkey PRIMARY KEY (id);
+ALTER TABLE ONLY connection_logs
+    ADD CONSTRAINT connection_logs_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY crypto_keys
     ADD CONSTRAINT crypto_keys_pkey PRIMARY KEY (feature, sequence);
@@ -2438,9 +2589,6 @@ ALTER TABLE ONLY oauth2_provider_app_tokens
     ADD CONSTRAINT oauth2_provider_app_tokens_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY oauth2_provider_apps
-    ADD CONSTRAINT oauth2_provider_apps_name_key UNIQUE (name);
-
-ALTER TABLE ONLY oauth2_provider_apps
     ADD CONSTRAINT oauth2_provider_apps_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY organization_members
@@ -2506,6 +2654,9 @@ ALTER TABLE ONLY template_version_parameters
 ALTER TABLE ONLY template_version_preset_parameters
     ADD CONSTRAINT template_version_preset_parameters_pkey PRIMARY KEY (id);
 
+ALTER TABLE ONLY template_version_preset_prebuild_schedules
+    ADD CONSTRAINT template_version_preset_prebuild_schedules_pkey PRIMARY KEY (id);
+
 ALTER TABLE ONLY template_version_presets
     ADD CONSTRAINT template_version_presets_pkey PRIMARY KEY (id);
 
@@ -2535,6 +2686,9 @@ ALTER TABLE ONLY user_deleted
 
 ALTER TABLE ONLY user_links
     ADD CONSTRAINT user_links_pkey PRIMARY KEY (user_id, login_type);
+
+ALTER TABLE ONLY user_secrets
+    ADD CONSTRAINT user_secrets_pkey PRIMARY KEY (id);
 
 ALTER TABLE ONLY user_status_changes
     ADD CONSTRAINT user_status_changes_pkey PRIMARY KEY (id);
@@ -2642,6 +2796,18 @@ CREATE INDEX idx_audit_log_user_id ON audit_logs USING btree (user_id);
 
 CREATE INDEX idx_audit_logs_time_desc ON audit_logs USING btree ("time" DESC);
 
+CREATE INDEX idx_connection_logs_connect_time_desc ON connection_logs USING btree (connect_time DESC);
+
+CREATE UNIQUE INDEX idx_connection_logs_connection_id_workspace_id_agent_name ON connection_logs USING btree (connection_id, workspace_id, agent_name);
+
+COMMENT ON INDEX idx_connection_logs_connection_id_workspace_id_agent_name IS 'Connection ID is NULL for web events, but present for SSH events. Therefore, this index allows multiple web events for the same workspace & agent. For SSH events, the upsertion query handles duplicates on this index by upserting the disconnect_time and disconnect_reason for the same connection_id when the connection is closed.';
+
+CREATE INDEX idx_connection_logs_organization_id ON connection_logs USING btree (organization_id);
+
+CREATE INDEX idx_connection_logs_workspace_id ON connection_logs USING btree (workspace_id);
+
+CREATE INDEX idx_connection_logs_workspace_owner_id ON connection_logs USING btree (workspace_owner_id);
+
 CREATE INDEX idx_custom_roles_id ON custom_roles USING btree (id);
 
 CREATE UNIQUE INDEX idx_custom_roles_name_lower ON custom_roles USING btree (lower(name));
@@ -2673,6 +2839,8 @@ CREATE INDEX idx_tailnet_peers_coordinator ON tailnet_peers USING btree (coordin
 CREATE INDEX idx_tailnet_tunnels_dst_id ON tailnet_tunnels USING hash (dst_id);
 
 CREATE INDEX idx_tailnet_tunnels_src_id ON tailnet_tunnels USING hash (src_id);
+
+CREATE UNIQUE INDEX idx_template_version_presets_default ON template_version_presets USING btree (template_version_id) WHERE (is_default = true);
 
 CREATE INDEX idx_template_versions_has_ai_task ON template_versions USING btree (has_ai_task);
 
@@ -2709,6 +2877,12 @@ COMMENT ON INDEX template_usage_stats_start_time_template_id_user_id_idx IS 'Ind
 CREATE UNIQUE INDEX templates_organization_id_name_idx ON templates USING btree (organization_id, lower((name)::text)) WHERE (deleted = false);
 
 CREATE UNIQUE INDEX user_links_linked_id_login_type_idx ON user_links USING btree (linked_id, login_type) WHERE (linked_id <> ''::text);
+
+CREATE UNIQUE INDEX user_secrets_user_env_name_idx ON user_secrets USING btree (user_id, env_name) WHERE (env_name <> ''::text);
+
+CREATE UNIQUE INDEX user_secrets_user_file_path_idx ON user_secrets USING btree (user_id, file_path) WHERE (file_path <> ''::text);
+
+CREATE UNIQUE INDEX user_secrets_user_name_idx ON user_secrets USING btree (user_id, name);
 
 CREATE UNIQUE INDEX users_email_lower_idx ON users USING btree (lower(email)) WHERE (deleted = false);
 
@@ -2847,14 +3021,20 @@ forward without requiring a migration to clean up historical data.';
 ALTER TABLE ONLY api_keys
     ADD CONSTRAINT api_keys_user_id_uuid_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY chat_messages
-    ADD CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES chats(id) ON DELETE CASCADE;
+ALTER TABLE ONLY connection_logs
+    ADD CONSTRAINT connection_logs_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE;
 
-ALTER TABLE ONLY chats
-    ADD CONSTRAINT chats_owner_id_fkey FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE;
+ALTER TABLE ONLY connection_logs
+    ADD CONSTRAINT connection_logs_workspace_id_fkey FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY connection_logs
+    ADD CONSTRAINT connection_logs_workspace_owner_id_fkey FOREIGN KEY (workspace_owner_id) REFERENCES users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY crypto_keys
     ADD CONSTRAINT crypto_keys_secret_key_id_fkey FOREIGN KEY (secret_key_id) REFERENCES dbcrypt_keys(active_key_digest);
+
+ALTER TABLE ONLY oauth2_provider_app_tokens
+    ADD CONSTRAINT fk_oauth2_provider_app_tokens_user_id FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY external_auth_links
     ADD CONSTRAINT git_auth_links_oauth_access_token_key_id_fkey FOREIGN KEY (oauth_access_token_key_id) REFERENCES dbcrypt_keys(active_key_digest);
@@ -2961,6 +3141,9 @@ ALTER TABLE ONLY template_version_parameters
 ALTER TABLE ONLY template_version_preset_parameters
     ADD CONSTRAINT template_version_preset_paramet_template_version_preset_id_fkey FOREIGN KEY (template_version_preset_id) REFERENCES template_version_presets(id) ON DELETE CASCADE;
 
+ALTER TABLE ONLY template_version_preset_prebuild_schedules
+    ADD CONSTRAINT template_version_preset_prebuild_schedules_preset_id_fkey FOREIGN KEY (preset_id) REFERENCES template_version_presets(id) ON DELETE CASCADE;
+
 ALTER TABLE ONLY template_version_presets
     ADD CONSTRAINT template_version_presets_template_version_id_fkey FOREIGN KEY (template_version_id) REFERENCES template_versions(id) ON DELETE CASCADE;
 
@@ -3005,6 +3188,9 @@ ALTER TABLE ONLY user_links
 
 ALTER TABLE ONLY user_links
     ADD CONSTRAINT user_links_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
+
+ALTER TABLE ONLY user_secrets
+    ADD CONSTRAINT user_secrets_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY user_status_changes
     ADD CONSTRAINT user_status_changes_user_id_fkey FOREIGN KEY (user_id) REFERENCES users(id);
@@ -3073,7 +3259,7 @@ ALTER TABLE ONLY workspace_build_parameters
     ADD CONSTRAINT workspace_build_parameters_workspace_build_id_fkey FOREIGN KEY (workspace_build_id) REFERENCES workspace_builds(id) ON DELETE CASCADE;
 
 ALTER TABLE ONLY workspace_builds
-    ADD CONSTRAINT workspace_builds_ai_tasks_sidebar_app_id_fkey FOREIGN KEY (ai_tasks_sidebar_app_id) REFERENCES workspace_apps(id);
+    ADD CONSTRAINT workspace_builds_ai_task_sidebar_app_id_fkey FOREIGN KEY (ai_task_sidebar_app_id) REFERENCES workspace_apps(id);
 
 ALTER TABLE ONLY workspace_builds
     ADD CONSTRAINT workspace_builds_job_id_fkey FOREIGN KEY (job_id) REFERENCES provisioner_jobs(id) ON DELETE CASCADE;

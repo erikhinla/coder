@@ -187,7 +187,7 @@ Status Code **200**
 | `resource_type` | `assign_org_role`                  |
 | `resource_type` | `assign_role`                      |
 | `resource_type` | `audit_log`                        |
-| `resource_type` | `chat`                             |
+| `resource_type` | `connection_log`                   |
 | `resource_type` | `crypto_key`                       |
 | `resource_type` | `debug_info`                       |
 | `resource_type` | `deployment_config`                |
@@ -206,6 +206,7 @@ Status Code **200**
 | `resource_type` | `oauth2_app_secret`                |
 | `resource_type` | `organization`                     |
 | `resource_type` | `organization_member`              |
+| `resource_type` | `prebuilt_workspace`               |
 | `resource_type` | `provisioner_daemon`               |
 | `resource_type` | `provisioner_jobs`                 |
 | `resource_type` | `replicas`                         |
@@ -213,6 +214,7 @@ Status Code **200**
 | `resource_type` | `tailnet_coordinator`              |
 | `resource_type` | `template`                         |
 | `resource_type` | `user`                             |
+| `resource_type` | `user_secret`                      |
 | `resource_type` | `webpush_subscription`             |
 | `resource_type` | `workspace`                        |
 | `resource_type` | `workspace_agent_devcontainers`    |
@@ -356,7 +358,7 @@ Status Code **200**
 | `resource_type` | `assign_org_role`                  |
 | `resource_type` | `assign_role`                      |
 | `resource_type` | `audit_log`                        |
-| `resource_type` | `chat`                             |
+| `resource_type` | `connection_log`                   |
 | `resource_type` | `crypto_key`                       |
 | `resource_type` | `debug_info`                       |
 | `resource_type` | `deployment_config`                |
@@ -375,6 +377,7 @@ Status Code **200**
 | `resource_type` | `oauth2_app_secret`                |
 | `resource_type` | `organization`                     |
 | `resource_type` | `organization_member`              |
+| `resource_type` | `prebuilt_workspace`               |
 | `resource_type` | `provisioner_daemon`               |
 | `resource_type` | `provisioner_jobs`                 |
 | `resource_type` | `replicas`                         |
@@ -382,6 +385,7 @@ Status Code **200**
 | `resource_type` | `tailnet_coordinator`              |
 | `resource_type` | `template`                         |
 | `resource_type` | `user`                             |
+| `resource_type` | `user_secret`                      |
 | `resource_type` | `webpush_subscription`             |
 | `resource_type` | `workspace`                        |
 | `resource_type` | `workspace_agent_devcontainers`    |
@@ -525,7 +529,7 @@ Status Code **200**
 | `resource_type` | `assign_org_role`                  |
 | `resource_type` | `assign_role`                      |
 | `resource_type` | `audit_log`                        |
-| `resource_type` | `chat`                             |
+| `resource_type` | `connection_log`                   |
 | `resource_type` | `crypto_key`                       |
 | `resource_type` | `debug_info`                       |
 | `resource_type` | `deployment_config`                |
@@ -544,6 +548,7 @@ Status Code **200**
 | `resource_type` | `oauth2_app_secret`                |
 | `resource_type` | `organization`                     |
 | `resource_type` | `organization_member`              |
+| `resource_type` | `prebuilt_workspace`               |
 | `resource_type` | `provisioner_daemon`               |
 | `resource_type` | `provisioner_jobs`                 |
 | `resource_type` | `replicas`                         |
@@ -551,6 +556,7 @@ Status Code **200**
 | `resource_type` | `tailnet_coordinator`              |
 | `resource_type` | `template`                         |
 | `resource_type` | `user`                             |
+| `resource_type` | `user_secret`                      |
 | `resource_type` | `webpush_subscription`             |
 | `resource_type` | `workspace`                        |
 | `resource_type` | `workspace_agent_devcontainers`    |
@@ -663,7 +669,7 @@ Status Code **200**
 | `resource_type` | `assign_org_role`                  |
 | `resource_type` | `assign_role`                      |
 | `resource_type` | `audit_log`                        |
-| `resource_type` | `chat`                             |
+| `resource_type` | `connection_log`                   |
 | `resource_type` | `crypto_key`                       |
 | `resource_type` | `debug_info`                       |
 | `resource_type` | `deployment_config`                |
@@ -682,6 +688,7 @@ Status Code **200**
 | `resource_type` | `oauth2_app_secret`                |
 | `resource_type` | `organization`                     |
 | `resource_type` | `organization_member`              |
+| `resource_type` | `prebuilt_workspace`               |
 | `resource_type` | `provisioner_daemon`               |
 | `resource_type` | `provisioner_jobs`                 |
 | `resource_type` | `replicas`                         |
@@ -689,6 +696,7 @@ Status Code **200**
 | `resource_type` | `tailnet_coordinator`              |
 | `resource_type` | `template`                         |
 | `resource_type` | `user`                             |
+| `resource_type` | `user_secret`                      |
 | `resource_type` | `webpush_subscription`             |
 | `resource_type` | `workspace`                        |
 | `resource_type` | `workspace_agent_devcontainers`    |
@@ -1023,7 +1031,7 @@ Status Code **200**
 | `resource_type` | `assign_org_role`                  |
 | `resource_type` | `assign_role`                      |
 | `resource_type` | `audit_log`                        |
-| `resource_type` | `chat`                             |
+| `resource_type` | `connection_log`                   |
 | `resource_type` | `crypto_key`                       |
 | `resource_type` | `debug_info`                       |
 | `resource_type` | `deployment_config`                |
@@ -1042,6 +1050,7 @@ Status Code **200**
 | `resource_type` | `oauth2_app_secret`                |
 | `resource_type` | `organization`                     |
 | `resource_type` | `organization_member`              |
+| `resource_type` | `prebuilt_workspace`               |
 | `resource_type` | `provisioner_daemon`               |
 | `resource_type` | `provisioner_jobs`                 |
 | `resource_type` | `replicas`                         |
@@ -1049,6 +1058,7 @@ Status Code **200**
 | `resource_type` | `tailnet_coordinator`              |
 | `resource_type` | `template`                         |
 | `resource_type` | `user`                             |
+| `resource_type` | `user_secret`                      |
 | `resource_type` | `webpush_subscription`             |
 | `resource_type` | `workspace`                        |
 | `resource_type` | `workspace_agent_devcontainers`    |

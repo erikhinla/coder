@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
@@ -20,7 +21,6 @@ import (
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog"
-	"github.com/coder/coder/v2/coderd/rbac/policy"
 
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
@@ -28,6 +28,7 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/rbac/regosql"
 	"github.com/coder/coder/v2/coderd/util/slice"
 )
@@ -105,11 +106,37 @@ func (s *MethodTestSuite) TearDownSuite() {
 
 var testActorID = uuid.New()
 
-// Subtest is a helper function that returns a function that can be passed to
+// Mocked runs a subtest with a mocked database. Removing the overhead of a real
+// postgres database resulting in much faster tests.
+func (s *MethodTestSuite) Mocked(testCaseF func(dmb *dbmock.MockStore, faker *gofakeit.Faker, check *expects)) func() {
+	t := s.T()
+	mDB := dbmock.NewMockStore(gomock.NewController(t))
+	mDB.EXPECT().Wrappers().Return([]string{}).AnyTimes()
+
+	// Use a constant seed to prevent flakes from random data generation.
+	faker := gofakeit.New(0)
+
+	// The usual Subtest assumes the test setup will use a real database to populate
+	// with data. In this mocked case, we want to pass the underlying mocked database
+	// to the test case instead.
+	return s.SubtestWithDB(mDB, func(_ database.Store, check *expects) {
+		testCaseF(mDB, faker, check)
+	})
+}
+
+// Subtest starts up a real postgres database for each test case.
+// Deprecated: Use 'Mocked' instead for much faster tests.
+func (s *MethodTestSuite) Subtest(testCaseF func(db database.Store, check *expects)) func() {
+	t := s.T()
+	db, _ := dbtestutil.NewDB(t)
+	return s.SubtestWithDB(db, testCaseF)
+}
+
+// SubtestWithDB is a helper function that returns a function that can be passed to
 // s.Run(). This function will run the test case for the method that is being
 // tested. The check parameter is used to assert the results of the method.
 // If the caller does not use the `check` parameter, the test will fail.
-func (s *MethodTestSuite) Subtest(testCaseF func(db database.Store, check *expects)) func() {
+func (s *MethodTestSuite) SubtestWithDB(db database.Store, testCaseF func(db database.Store, check *expects)) func() {
 	return func() {
 		t := s.T()
 		testName := s.T().Name()
@@ -117,7 +144,6 @@ func (s *MethodTestSuite) Subtest(testCaseF func(db database.Store, check *expec
 		methodName := names[len(names)-1]
 		s.methodAccounting[methodName]++
 
-		db, _ := dbtestutil.NewDB(t)
 		fakeAuthorizer := &coderdtest.FakeAuthorizer{}
 		rec := &coderdtest.RecordingAuthorizer{
 			Wrapped: fakeAuthorizer,
@@ -271,7 +297,7 @@ func (s *MethodTestSuite) NotAuthorizedErrorTest(ctx context.Context, az *coderd
 
 		// This is unfortunate, but if we are using `Filter` the error returned will be nil. So filter out
 		// any case where the error is nil and the response is an empty slice.
-		if err != nil || !hasEmptySliceResponse(resp) {
+		if err != nil || !hasEmptyResponse(resp) {
 			// Expect the default error
 			if testCase.notAuthorizedExpect == "" {
 				s.ErrorContainsf(err, "unauthorized", "error string should have a good message")
@@ -296,8 +322,8 @@ func (s *MethodTestSuite) NotAuthorizedErrorTest(ctx context.Context, az *coderd
 		resp, err := callMethod(ctx)
 
 		// This is unfortunate, but if we are using `Filter` the error returned will be nil. So filter out
-		// any case where the error is nil and the response is an empty slice.
-		if err != nil || !hasEmptySliceResponse(resp) {
+		// any case where the error is nil and the response is an empty slice or int64(0).
+		if err != nil || !hasEmptyResponse(resp) {
 			if testCase.cancelledCtxExpect == "" {
 				s.Errorf(err, "method should an error with cancellation")
 				s.ErrorIsf(err, context.Canceled, "error should match context.Canceled")
@@ -308,10 +334,17 @@ func (s *MethodTestSuite) NotAuthorizedErrorTest(ctx context.Context, az *coderd
 	})
 }
 
-func hasEmptySliceResponse(values []reflect.Value) bool {
+func hasEmptyResponse(values []reflect.Value) bool {
 	for _, r := range values {
 		if r.Kind() == reflect.Slice || r.Kind() == reflect.Array {
 			if r.Len() == 0 {
+				return true
+			}
+		}
+
+		// Special case for int64, as it's the return type for count queries.
+		if r.Kind() == reflect.Int64 {
+			if r.Int() == 0 {
 				return true
 			}
 		}
@@ -458,7 +491,6 @@ type AssertRBAC struct {
 func values(ins ...any) []reflect.Value {
 	out := make([]reflect.Value, 0)
 	for _, input := range ins {
-		input := input
 		out = append(out, reflect.ValueOf(input))
 	}
 	return out

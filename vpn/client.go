@@ -78,6 +78,19 @@ type Options struct {
 	UpdateHandler    tailnet.UpdatesHandler
 }
 
+type derpMapRewriter struct {
+	logger    slog.Logger
+	serverURL *url.URL
+}
+
+var _ tailnet.DERPMapRewriter = &derpMapRewriter{}
+
+// RewriteDERPMap implements tailnet.DERPMapRewriter. See
+// tailnet.RewriteDERPMapDefaultRelay for more details on why this is necessary.
+func (d *derpMapRewriter) RewriteDERPMap(derpMap *tailcfg.DERPMap) {
+	tailnet.RewriteDERPMapDefaultRelay(context.Background(), d.logger, derpMap, d.serverURL)
+}
+
 func (*client) NewConn(initCtx context.Context, serverURL *url.URL, token string, options *Options) (vpnC Conn, err error) {
 	if options == nil {
 		options = &Options{}
@@ -92,7 +105,7 @@ func (*client) NewConn(initCtx context.Context, serverURL *url.URL, token string
 	sdk.SetSessionToken(token)
 	sdk.HTTPClient.Transport = &codersdk.HeaderTransport{
 		Transport: http.DefaultTransport,
-		Header:    headers,
+		Header:    headers.Clone(),
 	}
 
 	// New context, separate from initCtx. We don't want to cancel the
@@ -129,17 +142,24 @@ func (*client) NewConn(initCtx context.Context, serverURL *url.URL, token string
 	headers.Set(codersdk.SessionTokenHeader, token)
 	dialer := workspacesdk.NewWebsocketDialer(options.Logger, rpcURL, &websocket.DialOptions{
 		HTTPClient:      sdk.HTTPClient,
-		HTTPHeader:      headers,
+		HTTPHeader:      headers.Clone(),
 		CompressionMode: websocket.CompressionDisabled,
 	}, workspacesdk.WithWorkspaceUpdates(&proto.WorkspaceUpdatesRequest{
 		WorkspaceOwnerId: tailnet.UUIDToByteSlice(me.ID),
 	}))
 
+	derpMapRewriter := &derpMapRewriter{
+		logger:    options.Logger,
+		serverURL: serverURL,
+	}
+	derpMapRewriter.RewriteDERPMap(connInfo.DERPMap)
+
+	clonedHeaders := headers.Clone()
 	ip := tailnet.CoderServicePrefix.RandomAddr()
 	conn, err := tailnet.NewConn(&tailnet.Options{
 		Addresses:           []netip.Prefix{netip.PrefixFrom(ip, 128)},
 		DERPMap:             connInfo.DERPMap,
-		DERPHeader:          &headers,
+		DERPHeader:          &clonedHeaders,
 		DERPForceWebSockets: connInfo.DERPForceWebSockets,
 		Logger:              options.Logger,
 		BlockEndpoints:      connInfo.DisableDirectConnections,
@@ -163,7 +183,7 @@ func (*client) NewConn(initCtx context.Context, serverURL *url.URL, token string
 	coordCtrl := tailnet.NewTunnelSrcCoordController(options.Logger, conn)
 	controller.ResumeTokenCtrl = tailnet.NewBasicResumeTokenController(options.Logger, clk)
 	controller.CoordCtrl = coordCtrl
-	controller.DERPCtrl = tailnet.NewBasicDERPController(options.Logger, conn)
+	controller.DERPCtrl = tailnet.NewBasicDERPController(options.Logger, derpMapRewriter, conn)
 	updatesCtrl := tailnet.NewTunnelAllWorkspaceUpdatesController(
 		options.Logger,
 		coordCtrl,

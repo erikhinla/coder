@@ -3,6 +3,7 @@
  * @see {@link https://shadcnui-expansions.typeart.cc/docs/multiple-selector}
  */
 import { Command as CommandPrimitive, useCommandState } from "cmdk";
+import { Avatar } from "components/Avatar/Avatar";
 import { Badge } from "components/Badge/Badge";
 import {
 	Command,
@@ -10,8 +11,14 @@ import {
 	CommandItem,
 	CommandList,
 } from "components/Command/Command";
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from "components/Tooltip/Tooltip";
 import { useDebouncedValue } from "hooks/debounce";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Info, X } from "lucide-react";
 import {
 	type ComponentProps,
 	type ComponentPropsWithoutRef,
@@ -30,7 +37,9 @@ import { cn } from "utils/cn";
 export interface Option {
 	value: string;
 	label: string;
+	icon?: string;
 	disable?: boolean;
+	description?: string;
 	/** fixed option that can't be removed. */
 	fixed?: boolean;
 	/** Group the options by providing key. */
@@ -95,6 +104,8 @@ interface MultiSelectComboboxProps {
 	>;
 	/** hide or show the button that clears all the selected options. */
 	hideClearAllButton?: boolean;
+	/** Test ID for testing purposes */
+	"data-testid"?: string;
 }
 
 interface MultiSelectComboboxRef {
@@ -196,6 +207,7 @@ export const MultiSelectCombobox = forwardRef<
 			commandProps,
 			inputProps,
 			hideClearAllButton = false,
+			"data-testid": dataTestId,
 		}: MultiSelectComboboxProps,
 		ref,
 	) => {
@@ -353,7 +365,9 @@ export const MultiSelectCombobox = forwardRef<
 		}, [debouncedSearchTerm, groupBy, open, triggerSearchOnFocus, onSearch]);
 
 		const CreatableItem = () => {
-			if (!creatable) return undefined;
+			if (!creatable) {
+				return undefined;
+			}
 			if (
 				isOptionsExist(options, [{ value: inputValue, label: inputValue }]) ||
 				selected.find((s) => s.value === inputValue)
@@ -437,11 +451,13 @@ export const MultiSelectCombobox = forwardRef<
 		}
 
 		const fixedOptions = selected.filter((s) => s.fixed);
+		const showIcons = arrayOptions?.some((it) => it.icon);
 
 		return (
 			<Command
 				ref={dropdownRef}
 				{...commandProps}
+				data-testid={dataTestId}
 				onKeyDown={(e) => {
 					handleKeyDown(e);
 					commandProps?.onKeyDown?.(e);
@@ -487,7 +503,16 @@ export const MultiSelectCombobox = forwardRef<
 										data-fixed={option.fixed}
 										data-disabled={disabled || undefined}
 									>
-										{option.label}
+										<div className="flex items-center gap-1">
+											{option.icon && (
+												<Avatar
+													size="sm"
+													src={option.icon}
+													fallback={option.label}
+												/>
+											)}
+											{option.label}
+										</div>
 										<button
 											type="button"
 											data-testid="clear-option-button"
@@ -596,7 +621,7 @@ export const MultiSelectCombobox = forwardRef<
 							}}
 						>
 							{isLoading ? (
-								<>{loadingIndicator}</>
+								loadingIndicator
 							) : (
 								<>
 									{EmptyItem()}
@@ -639,7 +664,33 @@ export const MultiSelectCombobox = forwardRef<
 																	"cursor-default text-content-disabled",
 															)}
 														>
-															{option.label}
+															<div className="flex items-center gap-2">
+																{showIcons && (
+																	<Avatar
+																		size="sm"
+																		src={option.icon}
+																		fallback={option.label}
+																	/>
+																)}
+																{option.label}
+																{option.description && (
+																	<TooltipProvider delayDuration={100}>
+																		<Tooltip>
+																			<TooltipTrigger asChild>
+																				<span className="flex items-center pointer-events-auto">
+																					<Info className="!w-3.5 !h-3.5 text-content-secondary" />
+																				</span>
+																			</TooltipTrigger>
+																			<TooltipContent
+																				side="right"
+																				sideOffset={10}
+																			>
+																				{option.description}
+																			</TooltipContent>
+																		</Tooltip>
+																	</TooltipProvider>
+																)}
+															</div>
 														</CommandItem>
 													);
 												})}

@@ -54,14 +54,12 @@ var (
 		Type: "audit_log",
 	}
 
-	// ResourceChat
+	// ResourceConnectionLog
 	// Valid Actions
-	//  - "ActionCreate" :: create a chat
-	//  - "ActionDelete" :: delete a chat
-	//  - "ActionRead" :: read a chat
-	//  - "ActionUpdate" :: update a chat
-	ResourceChat = Object{
-		Type: "chat",
+	//  - "ActionRead" :: read connection logs
+	//  - "ActionUpdate" :: upsert connection log entries
+	ResourceConnectionLog = Object{
+		Type: "connection_log",
 	}
 
 	// ResourceCryptoKey
@@ -222,6 +220,14 @@ var (
 		Type: "organization_member",
 	}
 
+	// ResourcePrebuiltWorkspace
+	// Valid Actions
+	//  - "ActionDelete" :: delete prebuilt workspace
+	//  - "ActionUpdate" :: update prebuilt workspace settings
+	ResourcePrebuiltWorkspace = Object{
+		Type: "prebuilt_workspace",
+	}
+
 	// ResourceProvisionerDaemon
 	// Valid Actions
 	//  - "ActionCreate" :: create a provisioner daemon/key
@@ -293,6 +299,16 @@ var (
 	//  - "ActionUpdatePersonal" :: update personal data
 	ResourceUser = Object{
 		Type: "user",
+	}
+
+	// ResourceUserSecret
+	// Valid Actions
+	//  - "ActionCreate" :: create a user secret
+	//  - "ActionDelete" :: delete a user secret
+	//  - "ActionRead" :: read user secret metadata and value
+	//  - "ActionUpdate" :: update user secret metadata and value
+	ResourceUserSecret = Object{
+		Type: "user_secret",
 	}
 
 	// ResourceWebpushSubscription
@@ -370,7 +386,7 @@ func AllResources() []Objecter {
 		ResourceAssignOrgRole,
 		ResourceAssignRole,
 		ResourceAuditLog,
-		ResourceChat,
+		ResourceConnectionLog,
 		ResourceCryptoKey,
 		ResourceDebugInfo,
 		ResourceDeploymentConfig,
@@ -389,6 +405,7 @@ func AllResources() []Objecter {
 		ResourceOauth2AppSecret,
 		ResourceOrganization,
 		ResourceOrganizationMember,
+		ResourcePrebuiltWorkspace,
 		ResourceProvisionerDaemon,
 		ResourceProvisionerJobs,
 		ResourceReplicas,
@@ -396,6 +413,7 @@ func AllResources() []Objecter {
 		ResourceTailnetCoordinator,
 		ResourceTemplate,
 		ResourceUser,
+		ResourceUserSecret,
 		ResourceWebpushSubscription,
 		ResourceWorkspace,
 		ResourceWorkspaceAgentDevcontainers,

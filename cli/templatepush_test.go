@@ -485,7 +485,6 @@ func TestTemplatePush(t *testing.T) {
 			}
 
 			for _, tt := range tests {
-				tt := tt
 				t.Run(tt.name, func(t *testing.T) {
 					t.Parallel()
 
@@ -510,6 +509,7 @@ func TestTemplatePush(t *testing.T) {
 								default = "1"
 							}
 							data "coder_parameter" "b" {
+								name = "b"
 								type = string
 								default = "2"
 							}

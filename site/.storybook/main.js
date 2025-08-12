@@ -5,17 +5,9 @@ module.exports = {
 
 	addons: [
 		"@chromatic-com/storybook",
-		{
-			name: "@storybook/addon-essentials",
-			options: {
-				backgrounds: false,
-			},
-		},
+		"@storybook/addon-docs",
 		"@storybook/addon-links",
-		"@storybook/addon-mdx-gfm",
 		"@storybook/addon-themes",
-		"@storybook/addon-actions",
-		"@storybook/addon-interactions",
 		"storybook-addon-remix-react-router",
 	],
 
@@ -35,6 +27,7 @@ module.exports = {
 				}),
 			);
 		}
+		config.server.allowedHosts = [".coder"];
 		return config;
 	},
 };

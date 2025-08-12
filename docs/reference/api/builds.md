@@ -27,10 +27,12 @@ curl -X GET http://coder-server:8080/api/v2/users/{user}/workspace/{workspacenam
 
 ```json
 {
+  "ai_task_sidebar_app_id": "852ddafb-2cb9-4cbf-8a8c-075389fb3d3d",
   "build_number": 0,
   "created_at": "2019-08-24T14:15:22Z",
   "daily_cost": 0,
   "deadline": "2019-08-24T14:15:22Z",
+  "has_ai_task": true,
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "initiator_id": "06588898-9a84-4b35-ba8f-f9cbd64946f3",
   "initiator_name": "string",
@@ -50,6 +52,7 @@ curl -X GET http://coder-server:8080/api/v2/users/{user}/workspace/{workspacenam
       "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1",
       "workspace_build_id": "badaf2eb-96c5-4050-9f1d-db2d39ca5478"
     },
+    "logs_overflowed": true,
     "metadata": {
       "template_display_name": "string",
       "template_icon": "string",
@@ -262,10 +265,12 @@ curl -X GET http://coder-server:8080/api/v2/workspacebuilds/{workspacebuild} \
 
 ```json
 {
+  "ai_task_sidebar_app_id": "852ddafb-2cb9-4cbf-8a8c-075389fb3d3d",
   "build_number": 0,
   "created_at": "2019-08-24T14:15:22Z",
   "daily_cost": 0,
   "deadline": "2019-08-24T14:15:22Z",
+  "has_ai_task": true,
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "initiator_id": "06588898-9a84-4b35-ba8f-f9cbd64946f3",
   "initiator_name": "string",
@@ -285,6 +290,7 @@ curl -X GET http://coder-server:8080/api/v2/workspacebuilds/{workspacebuild} \
       "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1",
       "workspace_build_id": "badaf2eb-96c5-4050-9f1d-db2d39ca5478"
     },
+    "logs_overflowed": true,
     "metadata": {
       "template_display_name": "string",
       "template_icon": "string",
@@ -487,9 +493,17 @@ curl -X PATCH http://coder-server:8080/api/v2/workspacebuilds/{workspacebuild}/c
 
 ### Parameters
 
-| Name             | In   | Type   | Required | Description        |
-|------------------|------|--------|----------|--------------------|
-| `workspacebuild` | path | string | true     | Workspace build ID |
+| Name             | In    | Type   | Required | Description                                                                                                                                                                              |
+|------------------|-------|--------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `workspacebuild` | path  | string | true     | Workspace build ID                                                                                                                                                                       |
+| `expect_status`  | query | string | false    | Expected status of the job. If expect_status is supplied, the request will be rejected with 412 Precondition Failed if the job doesn't match the state when performing the cancellation. |
+
+#### Enumerated Values
+
+| Parameter       | Value     |
+|-----------------|-----------|
+| `expect_status` | `running` |
+| `expect_status` | `pending` |
 
 ### Example responses
 
@@ -929,6 +943,7 @@ Status Code **200**
 | `sharing_level`           | `organization`     |
 | `sharing_level`           | `public`           |
 | `state`                   | `working`          |
+| `state`                   | `idle`             |
 | `state`                   | `complete`         |
 | `state`                   | `failure`          |
 | `lifecycle_state`         | `created`          |
@@ -977,10 +992,12 @@ curl -X GET http://coder-server:8080/api/v2/workspacebuilds/{workspacebuild}/sta
 
 ```json
 {
+  "ai_task_sidebar_app_id": "852ddafb-2cb9-4cbf-8a8c-075389fb3d3d",
   "build_number": 0,
   "created_at": "2019-08-24T14:15:22Z",
   "daily_cost": 0,
   "deadline": "2019-08-24T14:15:22Z",
+  "has_ai_task": true,
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "initiator_id": "06588898-9a84-4b35-ba8f-f9cbd64946f3",
   "initiator_name": "string",
@@ -1000,6 +1017,7 @@ curl -X GET http://coder-server:8080/api/v2/workspacebuilds/{workspacebuild}/sta
       "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1",
       "workspace_build_id": "badaf2eb-96c5-4050-9f1d-db2d39ca5478"
     },
+    "logs_overflowed": true,
     "metadata": {
       "template_display_name": "string",
       "template_icon": "string",
@@ -1285,10 +1303,12 @@ curl -X GET http://coder-server:8080/api/v2/workspaces/{workspace}/builds \
 ```json
 [
   {
+    "ai_task_sidebar_app_id": "852ddafb-2cb9-4cbf-8a8c-075389fb3d3d",
     "build_number": 0,
     "created_at": "2019-08-24T14:15:22Z",
     "daily_cost": 0,
     "deadline": "2019-08-24T14:15:22Z",
+    "has_ai_task": true,
     "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
     "initiator_id": "06588898-9a84-4b35-ba8f-f9cbd64946f3",
     "initiator_name": "string",
@@ -1308,6 +1328,7 @@ curl -X GET http://coder-server:8080/api/v2/workspaces/{workspace}/builds \
         "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1",
         "workspace_build_id": "badaf2eb-96c5-4050-9f1d-db2d39ca5478"
       },
+      "logs_overflowed": true,
       "metadata": {
         "template_display_name": "string",
         "template_icon": "string",
@@ -1501,10 +1522,12 @@ Status Code **200**
 | Name                             | Type                                                                                                   | Required | Restrictions | Description                                                                                                                                                                                                                                    |
 |----------------------------------|--------------------------------------------------------------------------------------------------------|----------|--------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `[array item]`                   | array                                                                                                  | false    |              |                                                                                                                                                                                                                                                |
+| `» ai_task_sidebar_app_id`       | string(uuid)                                                                                           | false    |              |                                                                                                                                                                                                                                                |
 | `» build_number`                 | integer                                                                                                | false    |              |                                                                                                                                                                                                                                                |
 | `» created_at`                   | string(date-time)                                                                                      | false    |              |                                                                                                                                                                                                                                                |
 | `» daily_cost`                   | integer                                                                                                | false    |              |                                                                                                                                                                                                                                                |
 | `» deadline`                     | string(date-time)                                                                                      | false    |              |                                                                                                                                                                                                                                                |
+| `» has_ai_task`                  | boolean                                                                                                | false    |              |                                                                                                                                                                                                                                                |
 | `» id`                           | string(uuid)                                                                                           | false    |              |                                                                                                                                                                                                                                                |
 | `» initiator_id`                 | string(uuid)                                                                                           | false    |              |                                                                                                                                                                                                                                                |
 | `» initiator_name`               | string                                                                                                 | false    |              |                                                                                                                                                                                                                                                |
@@ -1521,6 +1544,7 @@ Status Code **200**
 | `»»» error`                      | string                                                                                                 | false    |              |                                                                                                                                                                                                                                                |
 | `»»» template_version_id`        | string(uuid)                                                                                           | false    |              |                                                                                                                                                                                                                                                |
 | `»»» workspace_build_id`         | string(uuid)                                                                                           | false    |              |                                                                                                                                                                                                                                                |
+| `»» logs_overflowed`             | boolean                                                                                                | false    |              |                                                                                                                                                                                                                                                |
 | `»» metadata`                    | [codersdk.ProvisionerJobMetadata](schemas.md#codersdkprovisionerjobmetadata)                           | false    |              |                                                                                                                                                                                                                                                |
 | `»»» template_display_name`      | string                                                                                                 | false    |              |                                                                                                                                                                                                                                                |
 | `»»» template_icon`              | string                                                                                                 | false    |              |                                                                                                                                                                                                                                                |
@@ -1685,6 +1709,7 @@ Status Code **200**
 | `sharing_level`           | `organization`                |
 | `sharing_level`           | `public`                      |
 | `state`                   | `working`                     |
+| `state`                   | `idle`                        |
 | `state`                   | `complete`                    |
 | `state`                   | `failure`                     |
 | `lifecycle_state`         | `created`                     |
@@ -1740,9 +1765,9 @@ curl -X POST http://coder-server:8080/api/v2/workspaces/{workspace}/builds \
 ```json
 {
   "dry_run": true,
-  "enable_dynamic_parameters": true,
   "log_level": "debug",
   "orphan": true,
+  "reason": "dashboard",
   "rich_parameter_values": [
     {
       "name": "string",
@@ -1771,10 +1796,12 @@ curl -X POST http://coder-server:8080/api/v2/workspaces/{workspace}/builds \
 
 ```json
 {
+  "ai_task_sidebar_app_id": "852ddafb-2cb9-4cbf-8a8c-075389fb3d3d",
   "build_number": 0,
   "created_at": "2019-08-24T14:15:22Z",
   "daily_cost": 0,
   "deadline": "2019-08-24T14:15:22Z",
+  "has_ai_task": true,
   "id": "497f6eca-6276-4993-bfeb-53cbbbba6f08",
   "initiator_id": "06588898-9a84-4b35-ba8f-f9cbd64946f3",
   "initiator_name": "string",
@@ -1794,6 +1821,7 @@ curl -X POST http://coder-server:8080/api/v2/workspaces/{workspace}/builds \
       "template_version_id": "0ba39c92-1f1b-4c32-aa3e-9925d7713eb1",
       "workspace_build_id": "badaf2eb-96c5-4050-9f1d-db2d39ca5478"
     },
+    "logs_overflowed": true,
     "metadata": {
       "template_display_name": "string",
       "template_icon": "string",

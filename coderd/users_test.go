@@ -32,7 +32,6 @@ import (
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbfake"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
-	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/util/ptr"
@@ -377,6 +376,43 @@ func TestDeleteUser(t *testing.T) {
 		require.Error(t, err, "should not be able to delete self")
 		require.ErrorAs(t, err, &apiErr, "should be a coderd error")
 		require.Equal(t, http.StatusForbidden, apiErr.StatusCode(), "should be forbidden")
+	})
+	t.Run("CountCheckIncludesAllWorkspaces", func(t *testing.T) {
+		t.Parallel()
+		client, _ := coderdtest.NewWithProvisionerCloser(t, nil)
+		firstUser := coderdtest.CreateFirstUser(t, client)
+
+		// Create a target user who will own a workspace
+		targetUserClient, targetUser := coderdtest.CreateAnotherUser(t, client, firstUser.OrganizationID)
+
+		// Create a User Admin who should not have permission to see the target user's workspace
+		userAdminClient, userAdmin := coderdtest.CreateAnotherUser(t, client, firstUser.OrganizationID)
+
+		// Grant User Admin role to the userAdmin
+		userAdmin, err := client.UpdateUserRoles(context.Background(), userAdmin.ID.String(), codersdk.UpdateRoles{
+			Roles: []string{rbac.RoleUserAdmin().String()},
+		})
+		require.NoError(t, err)
+
+		// Create a template and workspace owned by the target user
+		version := coderdtest.CreateTemplateVersion(t, client, firstUser.OrganizationID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+		template := coderdtest.CreateTemplate(t, client, firstUser.OrganizationID, version.ID)
+		_ = coderdtest.CreateWorkspace(t, targetUserClient, template.ID)
+
+		workspaces, err := userAdminClient.Workspaces(context.Background(), codersdk.WorkspaceFilter{
+			Owner: targetUser.Username,
+		})
+		require.NoError(t, err)
+		require.Len(t, workspaces.Workspaces, 0)
+
+		// Attempt to delete the target user - this should fail because the
+		// user has a workspace not visible to the deleting user.
+		err = userAdminClient.DeleteUser(context.Background(), targetUser.ID)
+		var apiErr *codersdk.Error
+		require.ErrorAs(t, err, &apiErr)
+		require.Equal(t, http.StatusExpectationFailed, apiErr.StatusCode())
+		require.Contains(t, apiErr.Message, "has workspaces")
 	})
 }
 
@@ -1777,7 +1813,6 @@ func TestUsersFilter(t *testing.T) {
 	}
 
 	for _, c := range testCases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 
@@ -1792,15 +1827,6 @@ func TestUsersFilter(t *testing.T) {
 				match := c.FilterF(c.Filter, made)
 				if match {
 					exp = append(exp, made)
-				}
-			}
-
-			// TODO: This can be removed with dbmem
-			if !dbtestutil.WillUsePostgres() {
-				for i := range matched.Users {
-					if len(matched.Users[i].OrganizationIDs) == 0 {
-						matched.Users[i].OrganizationIDs = nil
-					}
 				}
 			}
 
@@ -2461,7 +2487,6 @@ func TestPaginatedUsers(t *testing.T) {
 	eg, _ := errgroup.WithContext(ctx)
 	// Create users
 	for i := 0; i < total; i++ {
-		i := i
 		eg.Go(func() error {
 			email := fmt.Sprintf("%d@coder.com", i)
 			username := fmt.Sprintf("user%d", i)
@@ -2519,7 +2544,6 @@ func TestPaginatedUsers(t *testing.T) {
 		{name: "username search", limit: 3, allUsers: specialUsers, opt: usernameSearch},
 	}
 	for _, tt := range tests {
-		tt := tt
 		t.Run(fmt.Sprintf("%s %d", tt.name, tt.limit), func(t *testing.T) {
 			t.Parallel()
 

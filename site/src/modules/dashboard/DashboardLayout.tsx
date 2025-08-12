@@ -7,7 +7,7 @@ import { InfoIcon } from "lucide-react";
 import { AnnouncementBanners } from "modules/dashboard/AnnouncementBanners/AnnouncementBanners";
 import { LicenseBanner } from "modules/dashboard/LicenseBanner/LicenseBanner";
 import { type FC, type HTMLAttributes, Suspense } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet } from "react-router";
 import { docs } from "utils/docs";
 import { DeploymentBanner } from "./DeploymentBanner/DeploymentBanner";
 import { Navbar } from "./Navbar/Navbar";
@@ -26,7 +26,7 @@ export const DashboardLayout: FC = () => {
 			<div className="flex flex-col min-h-full">
 				<Navbar />
 
-				<div className="flex flex-col flex-1">
+				<div className="flex flex-col flex-1 pb-12">
 					<Suspense fallback={<Loader />}>
 						<Outlet />
 					</Suspense>

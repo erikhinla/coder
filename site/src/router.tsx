@@ -1,6 +1,4 @@
 import { GlobalErrorBoundary } from "components/ErrorBoundary/GlobalErrorBoundary";
-import { ChatLayout } from "pages/ChatPage/ChatLayout";
-import { ChatMessages } from "pages/ChatPage/ChatMessages";
 import { TemplateRedirectController } from "pages/TemplatePage/TemplateRedirectController";
 import { Suspense, lazy } from "react";
 import {
@@ -9,11 +7,12 @@ import {
 	Route,
 	createBrowserRouter,
 	createRoutesFromChildren,
-} from "react-router-dom";
+} from "react-router";
 import { Loader } from "./components/Loader/Loader";
 import { RequireAuth } from "./contexts/auth/RequireAuth";
 import { DashboardLayout } from "./modules/dashboard/DashboardLayout";
 import AuditPage from "./pages/AuditPage/AuditPage";
+import ConnectionLogPage from "./pages/ConnectionLogPage/ConnectionLogPage";
 import { HealthLayout } from "./pages/HealthPage/HealthLayout";
 import LoginOAuthDevicePage from "./pages/LoginOAuthDevicePage/LoginOAuthDevicePage";
 import LoginPage from "./pages/LoginPage/LoginPage";
@@ -33,7 +32,6 @@ const NotFoundPage = lazy(() => import("./pages/404Page/404Page"));
 const DeploymentSettingsLayout = lazy(
 	() => import("./modules/management/DeploymentSettingsLayout"),
 );
-const ChatLanding = lazy(() => import("./pages/ChatPage/ChatLanding"));
 const DeploymentConfigProvider = lazy(
 	() => import("./modules/management/DeploymentConfigProvider"),
 );
@@ -86,6 +84,12 @@ const WorkspaceParametersExperimentRouter = lazy(
 	() =>
 		import(
 			"./pages/WorkspaceSettingsPage/WorkspaceParametersPage/WorkspaceParametersExperimentRouter"
+		),
+);
+const WorkspaceSharingPage = lazy(
+	() =>
+		import(
+			"./pages/WorkspaceSettingsPage/WorkspaceSharingPage/WorkspaceSharingPage"
 		),
 );
 const TerminalPage = lazy(() => import("./pages/TerminalPage/TerminalPage"));
@@ -273,8 +277,11 @@ const ProvisionersPage = lazy(
 			"./pages/OrganizationSettingsPage/OrganizationProvisionersPage/OrganizationProvisionersPage"
 		),
 );
-const TemplateEmbedPage = lazy(
-	() => import("./pages/TemplatePage/TemplateEmbedPage/TemplateEmbedPage"),
+const TemplateEmbedExperimentRouter = lazy(
+	() =>
+		import(
+			"./pages/TemplatePage/TemplateEmbedPage/TemplateEmbedExperimentRouter"
+		),
 );
 const TemplateInsightsPage = lazy(
 	() =>
@@ -346,7 +353,7 @@ const templateRouter = () => {
 					<Route path="files" element={<TemplateFilesPage />} />
 					<Route path="resources" element={<TemplateResourcesPage />} />
 					<Route path="versions" element={<TemplateVersionsPage />} />
-					<Route path="embed" element={<TemplateEmbedPage />} />
+					<Route path="embed" element={<TemplateEmbedExperimentRouter />} />
 					<Route path="insights" element={<TemplateInsightsPage />} />
 				</Route>
 
@@ -433,10 +440,7 @@ export const router = createBrowserRouter(
 
 					<Route path="/audit" element={<AuditPage />} />
 
-					<Route path="/chat" element={<ChatLayout />}>
-						<Route index element={<ChatLanding />} />
-						<Route path=":chatID" element={<ChatMessages />} />
-					</Route>
+					<Route path="/connectionlog" element={<ConnectionLogPage />} />
 
 					<Route path="/tasks" element={<TasksPage />} />
 
@@ -549,6 +553,7 @@ export const router = createBrowserRouter(
 								element={<WorkspaceParametersExperimentRouter />}
 							/>
 							<Route path="schedule" element={<WorkspaceSchedulePage />} />
+							<Route path="sharing" element={<WorkspaceSharingPage />} />
 						</Route>
 					</Route>
 

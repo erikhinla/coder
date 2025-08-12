@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +18,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"cdr.dev/slog"
+	"github.com/coder/terraform-provider-coder/v2/provider"
+
 	"github.com/coder/coder/v2/agent/agenttest"
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/coderdtest"
@@ -42,7 +43,6 @@ import (
 	"github.com/coder/coder/v2/provisioner/echo"
 	"github.com/coder/coder/v2/provisionersdk/proto"
 	"github.com/coder/coder/v2/testutil"
-	"github.com/coder/terraform-provider-coder/v2/provider"
 )
 
 func TestWorkspace(t *testing.T) {
@@ -431,9 +431,9 @@ func TestWorkspace(t *testing.T) {
 
 		// Test Utility variables
 		templateVersionParameters := []*proto.RichParameter{
-			{Name: "param1", Type: "string", Required: false},
-			{Name: "param2", Type: "string", Required: false},
-			{Name: "param3", Type: "string", Required: false},
+			{Name: "param1", Type: "string", Required: false, DefaultValue: "default1"},
+			{Name: "param2", Type: "string", Required: false, DefaultValue: "default2"},
+			{Name: "param3", Type: "string", Required: false, DefaultValue: "default3"},
 		}
 		presetParameters := []*proto.PresetParameter{
 			{Name: "param1", Value: "value1"},
@@ -652,7 +652,6 @@ func TestWorkspace(t *testing.T) {
 		}
 
 		for _, tc := range testCases {
-			tc := tc // Capture range variable
 			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 
@@ -1426,9 +1425,6 @@ func TestWorkspaceByOwnerAndName(t *testing.T) {
 // TestWorkspaceFilterAllStatus tests workspace status is correctly set given a set of conditions.
 func TestWorkspaceFilterAllStatus(t *testing.T) {
 	t.Parallel()
-	if os.Getenv("DB") != "" {
-		t.Skip(`This test takes too long with an actual database. Takes 10s on local machine`)
-	}
 
 	// For this test, we do not care about permissions.
 	// nolint:gocritic // unit testing
@@ -1802,7 +1798,6 @@ func TestWorkspaceFilter(t *testing.T) {
 	}
 
 	for _, c := range testCases {
-		c := c
 		t.Run(c.Name, func(t *testing.T) {
 			t.Parallel()
 			workspaces, err := client.Workspaces(ctx, c.Filter)
@@ -2583,7 +2578,6 @@ func TestWorkspaceUpdateAutostart(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 			var (
@@ -2684,8 +2678,7 @@ func TestWorkspaceUpdateAutostart(t *testing.T) {
 		// ensure test invariant: new workspaces have no autostart schedule.
 		require.Empty(t, workspace.AutostartSchedule, "expected newly-minted workspace to have no autostart schedule")
 
-		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
-		defer cancel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 
 		err := client.UpdateWorkspaceAutostart(ctx, workspace.ID, codersdk.UpdateWorkspaceAutostartRequest{
 			Schedule: ptr.Ref("CRON_TZ=Europe/Dublin 30 9 * * 1-5"),
@@ -2704,8 +2697,7 @@ func TestWorkspaceUpdateAutostart(t *testing.T) {
 			}
 		)
 
-		ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
-		defer cancel()
+		ctx := testutil.Context(t, testutil.WaitLong)
 
 		err := client.UpdateWorkspaceAutostart(ctx, wsid, req)
 		require.IsType(t, err, &codersdk.Error{}, "expected codersdk.Error")
@@ -2763,7 +2755,6 @@ func TestWorkspaceUpdateTTL(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		testCase := testCase
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -2864,8 +2855,6 @@ func TestWorkspaceUpdateTTL(t *testing.T) {
 		}
 
 		for _, testCase := range testCases {
-			testCase := testCase
-
 			t.Run(testCase.name, func(t *testing.T) {
 				t.Parallel()
 
@@ -2884,12 +2873,17 @@ func TestWorkspaceUpdateTTL(t *testing.T) {
 				ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
 				defer cancel()
 
-				err := client.UpdateWorkspaceTTL(ctx, workspace.ID, codersdk.UpdateWorkspaceTTLRequest{
-					TTLMillis: testCase.toTTL,
-				})
+				// Re-fetch the workspace build. This is required because
+				// `AwaitWorkspaceBuildJobCompleted` can return stale data.
+				build, err := client.WorkspaceBuild(ctx, build.ID)
 				require.NoError(t, err)
 
 				deadlineBefore := build.Deadline
+
+				err = client.UpdateWorkspaceTTL(ctx, workspace.ID, codersdk.UpdateWorkspaceTTLRequest{
+					TTLMillis: testCase.toTTL,
+				})
+				require.NoError(t, err)
 
 				build, err = client.WorkspaceBuild(ctx, build.ID)
 				require.NoError(t, err)
@@ -2899,6 +2893,56 @@ func TestWorkspaceUpdateTTL(t *testing.T) {
 				testCase.afterUpdate(t, deadlineBefore, deadlineAfter)
 			})
 		}
+	})
+
+	t.Run("RemoveAutostopWithRunningWorkspaceWithMaxDeadline", func(t *testing.T) {
+		t.Parallel()
+
+		var (
+			ctx         = testutil.Context(t, testutil.WaitLong)
+			client, db  = coderdtest.NewWithDatabase(t, &coderdtest.Options{IncludeProvisionerDaemon: true})
+			user        = coderdtest.CreateFirstUser(t, client)
+			version     = coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+			_           = coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+			template    = coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+			deadline    = 8 * time.Hour
+			maxDeadline = 10 * time.Hour
+			workspace   = coderdtest.CreateWorkspace(t, client, template.ID, func(cwr *codersdk.CreateWorkspaceRequest) {
+				cwr.TTLMillis = ptr.Ref(deadline.Milliseconds())
+			})
+			build = coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
+		)
+
+		// This is a hack, but the max_deadline isn't precisely configurable
+		// without a lot of unnecessary hassle.
+		dbBuild, err := db.GetWorkspaceBuildByID(dbauthz.AsSystemRestricted(ctx), build.ID) //nolint:gocritic // test
+		require.NoError(t, err)
+		dbJob, err := db.GetProvisionerJobByID(dbauthz.AsSystemRestricted(ctx), dbBuild.JobID) //nolint:gocritic // test
+		require.NoError(t, err)
+		require.True(t, dbJob.CompletedAt.Valid)
+		initialDeadline := dbJob.CompletedAt.Time.Add(deadline)
+		expectedMaxDeadline := dbJob.CompletedAt.Time.Add(maxDeadline)
+		err = db.UpdateWorkspaceBuildDeadlineByID(dbauthz.AsSystemRestricted(ctx), database.UpdateWorkspaceBuildDeadlineByIDParams{ //nolint:gocritic // test
+			ID:          build.ID,
+			Deadline:    initialDeadline,
+			MaxDeadline: expectedMaxDeadline,
+			UpdatedAt:   dbtime.Now(),
+		})
+		require.NoError(t, err)
+
+		// Remove autostop.
+		err = client.UpdateWorkspaceTTL(ctx, workspace.ID, codersdk.UpdateWorkspaceTTLRequest{
+			TTLMillis: nil,
+		})
+		require.NoError(t, err)
+
+		// Expect that the deadline is set to the max_deadline.
+		build, err = client.WorkspaceBuild(ctx, build.ID)
+		require.NoError(t, err)
+		require.True(t, build.Deadline.Valid)
+		require.WithinDuration(t, build.Deadline.Time, expectedMaxDeadline, time.Second)
+		require.True(t, build.MaxDeadline.Valid)
+		require.WithinDuration(t, build.MaxDeadline.Time, expectedMaxDeadline, time.Second)
 	})
 
 	t.Run("CustomAutostopDisabledByTemplate", func(t *testing.T) {
@@ -3250,7 +3294,7 @@ func TestWorkspaceWatcher(t *testing.T) {
 	closeFunc.Close()
 	build := coderdtest.CreateWorkspaceBuild(t, client, workspace, database.WorkspaceTransitionStart)
 	wait("first is for the workspace build itself", nil)
-	err = client.CancelWorkspaceBuild(ctx, build.ID)
+	err = client.CancelWorkspaceBuild(ctx, build.ID, codersdk.CancelWorkspaceBuildParams{})
 	require.NoError(t, err)
 	wait("second is for the build cancel", nil)
 }
@@ -3846,7 +3890,9 @@ func TestWorkspaceWithEphemeralRichParameters(t *testing.T) {
 		}},
 	})
 	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
-	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID, func(request *codersdk.CreateTemplateRequest) {
+		request.UseClassicParameterFlow = ptr.Ref(true) // TODO: Remove this when dynamic parameters handles this case
+	})
 
 	// Create workspace with default values
 	workspace := coderdtest.CreateWorkspace(t, client, template.ID)
@@ -3998,7 +4044,7 @@ func TestWorkspaceDormant(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should be able to stop a workspace while it is dormant.
-		coderdtest.MustTransitionWorkspace(t, client, workspace.ID, database.WorkspaceTransitionStart, database.WorkspaceTransitionStop)
+		coderdtest.MustTransitionWorkspace(t, client, workspace.ID, codersdk.WorkspaceTransitionStart, codersdk.WorkspaceTransitionStop)
 
 		// Should not be able to start a workspace while it is dormant.
 		_, err = client.CreateWorkspaceBuild(ctx, workspace.ID, codersdk.CreateWorkspaceBuildRequest{
@@ -4011,7 +4057,7 @@ func TestWorkspaceDormant(t *testing.T) {
 			Dormant: false,
 		})
 		require.NoError(t, err)
-		coderdtest.MustTransitionWorkspace(t, client, workspace.ID, database.WorkspaceTransitionStop, database.WorkspaceTransitionStart)
+		coderdtest.MustTransitionWorkspace(t, client, workspace.ID, codersdk.WorkspaceTransitionStop, codersdk.WorkspaceTransitionStart)
 	})
 }
 
@@ -4493,4 +4539,378 @@ func TestOIDCRemoved(t *testing.T) {
 	})
 	require.NoError(t, err, "delete the workspace")
 	coderdtest.AwaitWorkspaceBuildJobCompleted(t, owner, deleteBuild.ID)
+}
+
+func TestWorkspaceFilterHasAITask(t *testing.T) {
+	t.Parallel()
+
+	db, pubsub := dbtestutil.NewDB(t)
+	client := coderdtest.New(t, &coderdtest.Options{
+		Database:                 db,
+		Pubsub:                   pubsub,
+		IncludeProvisionerDaemon: true,
+	})
+	user := coderdtest.CreateFirstUser(t, client)
+
+	version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, nil)
+	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+
+	ctx := testutil.Context(t, testutil.WaitLong)
+
+	// Helper function to create workspace with AI task configuration
+	createWorkspaceWithAIConfig := func(hasAITask sql.NullBool, jobCompleted bool, aiTaskPrompt *string) database.WorkspaceTable {
+		// When a provisioner job uses these tags, no provisioner will match it.
+		// We do this so jobs will always be stuck in "pending", allowing us to exercise the intermediary state when
+		// has_ai_task is nil and we compensate by looking at pending provisioning jobs.
+		// See GetWorkspaces clauses.
+		unpickableTags := database.StringMap{"custom": "true"}
+
+		ws := dbgen.Workspace(t, db, database.WorkspaceTable{
+			OwnerID:        user.UserID,
+			OrganizationID: user.OrganizationID,
+			TemplateID:     template.ID,
+		})
+
+		jobConfig := database.ProvisionerJob{
+			OrganizationID: user.OrganizationID,
+			InitiatorID:    user.UserID,
+			Tags:           unpickableTags,
+		}
+		if jobCompleted {
+			jobConfig.CompletedAt = sql.NullTime{Time: time.Now(), Valid: true}
+		}
+		job := dbgen.ProvisionerJob(t, db, pubsub, jobConfig)
+
+		res := dbgen.WorkspaceResource(t, db, database.WorkspaceResource{JobID: job.ID})
+		agnt := dbgen.WorkspaceAgent(t, db, database.WorkspaceAgent{ResourceID: res.ID})
+
+		var sidebarAppID uuid.UUID
+		if hasAITask.Bool {
+			sidebarApp := dbgen.WorkspaceApp(t, db, database.WorkspaceApp{AgentID: agnt.ID})
+			sidebarAppID = sidebarApp.ID
+		}
+
+		build := dbgen.WorkspaceBuild(t, db, database.WorkspaceBuild{
+			WorkspaceID:        ws.ID,
+			TemplateVersionID:  version.ID,
+			InitiatorID:        user.UserID,
+			JobID:              job.ID,
+			BuildNumber:        1,
+			HasAITask:          hasAITask,
+			AITaskSidebarAppID: uuid.NullUUID{UUID: sidebarAppID, Valid: sidebarAppID != uuid.Nil},
+		})
+
+		if aiTaskPrompt != nil {
+			//nolint:gocritic // unit test
+			err := db.InsertWorkspaceBuildParameters(dbauthz.AsSystemRestricted(ctx), database.InsertWorkspaceBuildParametersParams{
+				WorkspaceBuildID: build.ID,
+				Name:             []string{provider.TaskPromptParameterName},
+				Value:            []string{*aiTaskPrompt},
+			})
+			require.NoError(t, err)
+		}
+
+		return ws
+	}
+
+	// Create test workspaces with different AI task configurations
+	wsWithAITask := createWorkspaceWithAIConfig(sql.NullBool{Bool: true, Valid: true}, true, nil)
+	wsWithoutAITask := createWorkspaceWithAIConfig(sql.NullBool{Bool: false, Valid: true}, false, nil)
+
+	aiTaskPrompt := "Build me a web app"
+	wsWithAITaskParam := createWorkspaceWithAIConfig(sql.NullBool{Valid: false}, false, &aiTaskPrompt)
+
+	anotherTaskPrompt := "Another task"
+	wsCompletedWithAITaskParam := createWorkspaceWithAIConfig(sql.NullBool{Valid: false}, true, &anotherTaskPrompt)
+
+	emptyPrompt := ""
+	wsWithEmptyAITaskParam := createWorkspaceWithAIConfig(sql.NullBool{Valid: false}, false, &emptyPrompt)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+	defer cancel()
+
+	// Debug: Check all workspaces without filter first
+	allRes, err := client.Workspaces(ctx, codersdk.WorkspaceFilter{})
+	require.NoError(t, err)
+	t.Logf("Total workspaces created: %d", len(allRes.Workspaces))
+	for i, ws := range allRes.Workspaces {
+		t.Logf("All Workspace %d: ID=%s, Name=%s, Build ID=%s, Job ID=%s", i, ws.ID, ws.Name, ws.LatestBuild.ID, ws.LatestBuild.Job.ID)
+	}
+
+	// Test filtering for workspaces with AI tasks
+	// Should include: wsWithAITask (has_ai_task=true) and wsWithAITaskParam (null + incomplete + param)
+	res, err := client.Workspaces(ctx, codersdk.WorkspaceFilter{
+		FilterQuery: "has-ai-task:true",
+	})
+	require.NoError(t, err)
+	t.Logf("Expected 2 workspaces for has-ai-task:true, got %d", len(res.Workspaces))
+	t.Logf("Expected workspaces: %s, %s", wsWithAITask.ID, wsWithAITaskParam.ID)
+	for i, ws := range res.Workspaces {
+		t.Logf("AI Task True Workspace %d: ID=%s, Name=%s", i, ws.ID, ws.Name)
+	}
+	require.Len(t, res.Workspaces, 2)
+	workspaceIDs := []uuid.UUID{res.Workspaces[0].ID, res.Workspaces[1].ID}
+	require.Contains(t, workspaceIDs, wsWithAITask.ID)
+	require.Contains(t, workspaceIDs, wsWithAITaskParam.ID)
+
+	// Test filtering for workspaces without AI tasks
+	// Should include: wsWithoutAITask, wsCompletedWithAITaskParam, wsWithEmptyAITaskParam
+	res, err = client.Workspaces(ctx, codersdk.WorkspaceFilter{
+		FilterQuery: "has-ai-task:false",
+	})
+	require.NoError(t, err)
+
+	// Debug: print what we got
+	t.Logf("Expected 3 workspaces for has-ai-task:false, got %d", len(res.Workspaces))
+	for i, ws := range res.Workspaces {
+		t.Logf("Workspace %d: ID=%s, Name=%s", i, ws.ID, ws.Name)
+	}
+	t.Logf("Expected IDs: %s, %s, %s", wsWithoutAITask.ID, wsCompletedWithAITaskParam.ID, wsWithEmptyAITaskParam.ID)
+
+	require.Len(t, res.Workspaces, 3)
+	workspaceIDs = []uuid.UUID{res.Workspaces[0].ID, res.Workspaces[1].ID, res.Workspaces[2].ID}
+	require.Contains(t, workspaceIDs, wsWithoutAITask.ID)
+	require.Contains(t, workspaceIDs, wsCompletedWithAITaskParam.ID)
+	require.Contains(t, workspaceIDs, wsWithEmptyAITaskParam.ID)
+
+	// Test no filter returns all
+	res, err = client.Workspaces(ctx, codersdk.WorkspaceFilter{})
+	require.NoError(t, err)
+	require.Len(t, res.Workspaces, 5)
+}
+
+func TestWorkspaceAppUpsertRestart(t *testing.T) {
+	t.Parallel()
+
+	client := coderdtest.New(t, &coderdtest.Options{
+		IncludeProvisionerDaemon: true,
+	})
+	user := coderdtest.CreateFirstUser(t, client)
+
+	// Define an app to be created with the workspace
+	apps := []*proto.App{
+		{
+			Id:          uuid.NewString(),
+			Slug:        "test-app",
+			DisplayName: "Test App",
+			Command:     "test-command",
+			Url:         "http://localhost:8080",
+			Icon:        "/test.svg",
+		},
+	}
+
+	// Create template version with workspace app
+	version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, &echo.Responses{
+		Parse: echo.ParseComplete,
+		ProvisionApply: []*proto.Response{{
+			Type: &proto.Response_Apply{
+				Apply: &proto.ApplyComplete{
+					Resources: []*proto.Resource{{
+						Name: "test-resource",
+						Type: "example",
+						Agents: []*proto.Agent{{
+							Id:   uuid.NewString(),
+							Name: "dev",
+							Auth: &proto.Agent_Token{},
+							Apps: apps,
+						}},
+					}},
+				},
+			},
+		}},
+	})
+	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+
+	// Create template and workspace
+	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+	workspace := coderdtest.CreateWorkspace(t, client, template.ID)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, workspace.LatestBuild.ID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+	defer cancel()
+
+	// Verify initial workspace has the app
+	workspace, err := client.Workspace(ctx, workspace.ID)
+	require.NoError(t, err)
+	require.Len(t, workspace.LatestBuild.Resources[0].Agents, 1)
+	agent := workspace.LatestBuild.Resources[0].Agents[0]
+	require.Len(t, agent.Apps, 1)
+	require.Equal(t, "test-app", agent.Apps[0].Slug)
+	require.Equal(t, "Test App", agent.Apps[0].DisplayName)
+
+	// Stop the workspace
+	stopBuild := coderdtest.CreateWorkspaceBuild(t, client, workspace, database.WorkspaceTransitionStop)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, stopBuild.ID)
+
+	// Restart the workspace (this will trigger upsert for the app)
+	startBuild := coderdtest.CreateWorkspaceBuild(t, client, workspace, database.WorkspaceTransitionStart)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, startBuild.ID)
+
+	// Verify the workspace restarted successfully
+	workspace, err = client.Workspace(ctx, workspace.ID)
+	require.NoError(t, err)
+	require.Equal(t, codersdk.WorkspaceStatusRunning, workspace.LatestBuild.Status)
+
+	// Verify the app is still present after restart (upsert worked)
+	require.Len(t, workspace.LatestBuild.Resources[0].Agents, 1)
+	agent = workspace.LatestBuild.Resources[0].Agents[0]
+	require.Len(t, agent.Apps, 1)
+	require.Equal(t, "test-app", agent.Apps[0].Slug)
+	require.Equal(t, "Test App", agent.Apps[0].DisplayName)
+
+	// Verify the provisioner job completed successfully (no error)
+	require.Equal(t, codersdk.ProvisionerJobSucceeded, workspace.LatestBuild.Job.Status)
+	require.Empty(t, workspace.LatestBuild.Job.Error)
+}
+
+func TestMultipleAITasksDisallowed(t *testing.T) {
+	t.Parallel()
+
+	db, pubsub := dbtestutil.NewDB(t)
+	client := coderdtest.New(t, &coderdtest.Options{
+		Database:                 db,
+		Pubsub:                   pubsub,
+		IncludeProvisionerDaemon: true,
+	})
+	user := coderdtest.CreateFirstUser(t, client)
+
+	version := coderdtest.CreateTemplateVersion(t, client, user.OrganizationID, &echo.Responses{
+		Parse: echo.ParseComplete,
+		ProvisionPlan: []*proto.Response{{
+			Type: &proto.Response_Plan{
+				Plan: &proto.PlanComplete{
+					HasAiTasks: true,
+					AiTasks: []*proto.AITask{
+						{
+							Id: uuid.NewString(),
+							SidebarApp: &proto.AITaskSidebarApp{
+								Id: uuid.NewString(),
+							},
+						},
+						{
+							Id: uuid.NewString(),
+							SidebarApp: &proto.AITaskSidebarApp{
+								Id: uuid.NewString(),
+							},
+						},
+					},
+				},
+			},
+		}},
+	})
+	coderdtest.AwaitTemplateVersionJobCompleted(t, client, version.ID)
+	template := coderdtest.CreateTemplate(t, client, user.OrganizationID, version.ID)
+
+	ws := coderdtest.CreateWorkspace(t, client, template.ID)
+	coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
+
+	//nolint: gocritic // testing
+	ctx := dbauthz.AsSystemRestricted(t.Context())
+	pj, err := db.GetProvisionerJobByID(ctx, ws.LatestBuild.Job.ID)
+	require.NoError(t, err)
+	require.Contains(t, pj.Error.String, "only one 'coder_ai_task' resource can be provisioned per template")
+}
+
+func TestUpdateWorkspaceACL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("OK", func(t *testing.T) {
+		t.Parallel()
+
+		dv := coderdtest.DeploymentValues(t)
+		dv.Experiments = []string{string(codersdk.ExperimentWorkspaceSharing)}
+		adminClient := coderdtest.New(t, &coderdtest.Options{
+			IncludeProvisionerDaemon: true,
+			DeploymentValues:         dv,
+		})
+		adminUser := coderdtest.CreateFirstUser(t, adminClient)
+		orgID := adminUser.OrganizationID
+		client, _ := coderdtest.CreateAnotherUser(t, adminClient, orgID)
+		_, friend := coderdtest.CreateAnotherUser(t, adminClient, orgID)
+
+		tv := coderdtest.CreateTemplateVersion(t, adminClient, orgID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, adminClient, tv.ID)
+		template := coderdtest.CreateTemplate(t, adminClient, orgID, tv.ID)
+
+		ws := coderdtest.CreateWorkspace(t, client, template.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
+
+		ctx := testutil.Context(t, testutil.WaitMedium)
+		err := client.UpdateWorkspaceACL(ctx, ws.ID, codersdk.UpdateWorkspaceACL{
+			UserRoles: map[string]codersdk.WorkspaceRole{
+				friend.ID.String(): codersdk.WorkspaceRoleAdmin,
+			},
+		})
+		require.NoError(t, err)
+	})
+
+	t.Run("UnknownUserID", func(t *testing.T) {
+		t.Parallel()
+
+		dv := coderdtest.DeploymentValues(t)
+		dv.Experiments = []string{string(codersdk.ExperimentWorkspaceSharing)}
+		adminClient := coderdtest.New(t, &coderdtest.Options{
+			IncludeProvisionerDaemon: true,
+			DeploymentValues:         dv,
+		})
+		adminUser := coderdtest.CreateFirstUser(t, adminClient)
+		orgID := adminUser.OrganizationID
+		client, _ := coderdtest.CreateAnotherUser(t, adminClient, orgID)
+
+		tv := coderdtest.CreateTemplateVersion(t, adminClient, orgID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, adminClient, tv.ID)
+		template := coderdtest.CreateTemplate(t, adminClient, orgID, tv.ID)
+
+		ws := coderdtest.CreateWorkspace(t, client, template.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
+
+		ctx := testutil.Context(t, testutil.WaitMedium)
+		err := client.UpdateWorkspaceACL(ctx, ws.ID, codersdk.UpdateWorkspaceACL{
+			UserRoles: map[string]codersdk.WorkspaceRole{
+				uuid.NewString(): codersdk.WorkspaceRoleAdmin,
+			},
+		})
+		require.Error(t, err)
+		cerr, ok := codersdk.AsError(err)
+		require.True(t, ok)
+		require.Len(t, cerr.Validations, 1)
+		require.Equal(t, cerr.Validations[0].Field, "user_roles")
+	})
+
+	t.Run("DeletedUser", func(t *testing.T) {
+		t.Parallel()
+
+		dv := coderdtest.DeploymentValues(t)
+		dv.Experiments = []string{string(codersdk.ExperimentWorkspaceSharing)}
+		adminClient := coderdtest.New(t, &coderdtest.Options{
+			IncludeProvisionerDaemon: true,
+			DeploymentValues:         dv,
+		})
+		adminUser := coderdtest.CreateFirstUser(t, adminClient)
+		orgID := adminUser.OrganizationID
+		client, _ := coderdtest.CreateAnotherUser(t, adminClient, orgID)
+		_, mike := coderdtest.CreateAnotherUser(t, adminClient, orgID)
+
+		tv := coderdtest.CreateTemplateVersion(t, adminClient, orgID, nil)
+		coderdtest.AwaitTemplateVersionJobCompleted(t, adminClient, tv.ID)
+		template := coderdtest.CreateTemplate(t, adminClient, orgID, tv.ID)
+
+		ws := coderdtest.CreateWorkspace(t, client, template.ID)
+		coderdtest.AwaitWorkspaceBuildJobCompleted(t, client, ws.LatestBuild.ID)
+
+		ctx := testutil.Context(t, testutil.WaitMedium)
+		err := adminClient.DeleteUser(ctx, mike.ID)
+		require.NoError(t, err)
+		err = client.UpdateWorkspaceACL(ctx, ws.ID, codersdk.UpdateWorkspaceACL{
+			UserRoles: map[string]codersdk.WorkspaceRole{
+				mike.ID.String(): codersdk.WorkspaceRoleAdmin,
+			},
+		})
+		require.Error(t, err)
+		cerr, ok := codersdk.AsError(err)
+		require.True(t, ok)
+		require.Len(t, cerr.Validations, 1)
+		require.Equal(t, cerr.Validations[0].Field, "user_roles")
+	})
 }

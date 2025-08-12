@@ -85,6 +85,7 @@ type Options struct {
 	Entitlements      *entitlements.Set
 	Telemetry         telemetry.Reporter
 	Logger            slog.Logger
+	HideAITasks       bool
 }
 
 func New(opts *Options) *Handler {
@@ -316,6 +317,8 @@ type htmlState struct {
 	Experiments    string
 	Regions        string
 	DocsURL        string
+
+	TasksTabVisible string
 }
 
 type csrfState struct {
@@ -550,6 +553,14 @@ func (h *Handler) renderHTMLWithState(r *http.Request, filePath string, state ht
 				}
 			}()
 		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tasksTabVisible, err := json.Marshal(!h.opts.HideAITasks)
+			if err == nil {
+				state.TasksTabVisible = html.EscapeString(string(tasksTabVisible))
+			}
+		}()
 		wg.Wait()
 	}
 
@@ -823,8 +834,6 @@ func verifyBinSha1IsCurrent(dest string, siteFS fs.FS, shaFiles map[string]strin
 
 	// Verify the hash of each on-disk binary.
 	for file, hash1 := range shaFiles {
-		file := file
-		hash1 := hash1
 		eg.Go(func() error {
 			hash2, err := sha1HashFile(filepath.Join(dest, file))
 			if err != nil {

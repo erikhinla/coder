@@ -1,4 +1,4 @@
-import type { StoryContext } from "@storybook/react";
+import type { StoryContext } from "@storybook/react-vite";
 import { withDefaultFeatures } from "api/api";
 import { getAuthorizationKey } from "api/queries/authCheck";
 import { hasFirstUserKey, meKey } from "api/queries/users";
@@ -18,6 +18,7 @@ import type { FC } from "react";
 import { useQueryClient } from "react-query";
 import {
 	MockAppearanceConfig,
+	MockBuildInfo,
 	MockDefaultOrganization,
 	MockDeploymentConfig,
 	MockEntitlements,
@@ -56,6 +57,10 @@ export const withDashboardProvider = (
 				entitlements,
 				experiments,
 				appearance: MockAppearanceConfig,
+				buildInfo: {
+					...MockBuildInfo,
+					version: "v0.0.0-test",
+				},
 				organizations,
 				showOrganizations,
 				canViewOrganizationSettings,

@@ -14,12 +14,16 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
+	"runtime/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/coder/v2/coderd/oauth2provider"
+	"github.com/coder/coder/v2/coderd/pproflabel"
 	"github.com/coder/coder/v2/coderd/prebuilds"
+	"github.com/coder/coder/v2/coderd/wsbuilder"
 
 	"github.com/andybalholm/brotli"
 	"github.com/go-chi/chi/v5"
@@ -45,7 +49,6 @@ import (
 
 	"github.com/coder/coder/v2/codersdk/drpcsdk"
 
-	"github.com/coder/coder/v2/coderd/ai"
 	"github.com/coder/coder/v2/coderd/cryptokeys"
 	"github.com/coder/coder/v2/coderd/entitlements"
 	"github.com/coder/coder/v2/coderd/files"
@@ -59,6 +62,7 @@ import (
 	"github.com/coder/coder/v2/coderd/appearance"
 	"github.com/coder/coder/v2/coderd/audit"
 	"github.com/coder/coder/v2/coderd/awsidentity"
+	"github.com/coder/coder/v2/coderd/connectionlog"
 	"github.com/coder/coder/v2/coderd/database"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbrollup"
@@ -76,6 +80,7 @@ import (
 	"github.com/coder/coder/v2/coderd/portsharing"
 	"github.com/coder/coder/v2/coderd/prometheusmetrics"
 	"github.com/coder/coder/v2/coderd/provisionerdserver"
+	"github.com/coder/coder/v2/coderd/proxyhealth"
 	"github.com/coder/coder/v2/coderd/rbac"
 	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/rbac/rolestore"
@@ -85,6 +90,7 @@ import (
 	"github.com/coder/coder/v2/coderd/updatecheck"
 	"github.com/coder/coder/v2/coderd/util/slice"
 	"github.com/coder/coder/v2/coderd/workspaceapps"
+	"github.com/coder/coder/v2/coderd/workspaceapps/appurl"
 	"github.com/coder/coder/v2/coderd/workspacestats"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/healthsdk"
@@ -152,13 +158,13 @@ type Options struct {
 	CacheDir string
 
 	Auditor                        audit.Auditor
+	ConnectionLogger               connectionlog.ConnectionLogger
 	AgentConnectionUpdateFrequency time.Duration
 	AgentInactiveDisconnectTimeout time.Duration
 	AWSCertificates                awsidentity.Certificates
 	Authorizer                     rbac.Authorizer
 	AzureCertificates              x509.VerifyOptions
 	GoogleTokenValidator           *idtoken.Validator
-	LanguageModels                 ai.LanguageModels
 	GithubOAuth2Config             *GithubOAuth2Config
 	OIDCConfig                     *OIDCConfig
 	PrometheusRegistry             *prometheus.Registry
@@ -399,6 +405,9 @@ func New(options *Options) *API {
 	if options.Auditor == nil {
 		options.Auditor = audit.NewNop()
 	}
+	if options.ConnectionLogger == nil {
+		options.ConnectionLogger = connectionlog.NewNop()
+	}
 	if options.SSHConfig.HostnamePrefix == "" {
 		options.SSHConfig.HostnamePrefix = "coder."
 	}
@@ -553,6 +562,13 @@ func New(options *Options) *API {
 	// bugs that may only occur when a key isn't precached in tests and the latency cost is minimal.
 	cryptokeys.StartRotator(ctx, options.Logger, options.Database)
 
+	// AGPL uses a no-op build usage checker as there are no license
+	// entitlements to enforce. This is swapped out in
+	// enterprise/coderd/coderd.go.
+	var buildUsageChecker atomic.Pointer[wsbuilder.UsageChecker]
+	var noopUsageChecker wsbuilder.UsageChecker = wsbuilder.NoopUsageChecker{}
+	buildUsageChecker.Store(&noopUsageChecker)
+
 	api := &API{
 		ctx:          ctx,
 		cancel:       cancel,
@@ -567,12 +583,14 @@ func New(options *Options) *API {
 		},
 		metricsCache:                metricsCache,
 		Auditor:                     atomic.Pointer[audit.Auditor]{},
+		ConnectionLogger:            atomic.Pointer[connectionlog.ConnectionLogger]{},
 		TailnetCoordinator:          atomic.Pointer[tailnet.Coordinator]{},
 		UpdatesProvider:             updatesProvider,
 		TemplateScheduleStore:       options.TemplateScheduleStore,
 		UserQuietHoursScheduleStore: options.UserQuietHoursScheduleStore,
 		AccessControlStore:          options.AccessControlStore,
-		FileCache:                   files.NewFromStore(options.Database, options.PrometheusRegistry, options.Authorizer),
+		BuildUsageChecker:           &buildUsageChecker,
+		FileCache:                   files.New(options.PrometheusRegistry, options.Authorizer),
 		Experiments:                 experiments,
 		WebpushDispatcher:           options.WebPushDispatcher,
 		healthCheckGroup:            &singleflight.Group[string, *healthsdk.HealthcheckReport]{},
@@ -588,7 +606,7 @@ func New(options *Options) *API {
 		options.Logger.Named("workspaceapps"),
 		options.AccessURL,
 		options.Authorizer,
-		&api.Auditor,
+		&api.ConnectionLogger,
 		options.Database,
 		options.DeploymentValues,
 		oauthConfigs,
@@ -626,6 +644,7 @@ func New(options *Options) *API {
 		Entitlements:      options.Entitlements,
 		Telemetry:         options.Telemetry,
 		Logger:            options.Logger.Named("site"),
+		HideAITasks:       options.DeploymentValues.HideAITasks.Value(),
 	})
 	api.SiteHandler.Experiments.Store(&experiments)
 
@@ -689,6 +708,7 @@ func New(options *Options) *API {
 	}
 
 	api.Auditor.Store(&options.Auditor)
+	api.ConnectionLogger.Store(&options.ConnectionLogger)
 	api.TailnetCoordinator.Store(&options.TailnetCoordinator)
 	dialer := &InmemTailnetDialer{
 		CoordPtr:            &api.TailnetCoordinator,
@@ -780,6 +800,8 @@ func New(options *Options) *API {
 		Optional:                      false,
 		SessionTokenFunc:              nil, // Default behavior
 		PostAuthAdditionalHeadersFunc: options.PostAuthAdditionalHeadersFunc,
+		Logger:                        options.Logger,
+		AccessURL:                     options.AccessURL,
 	})
 	// Same as above but it redirects to the login page.
 	apiKeyMiddlewareRedirect := httpmw.ExtractAPIKeyMW(httpmw.ExtractAPIKeyConfig{
@@ -790,6 +812,8 @@ func New(options *Options) *API {
 		Optional:                      false,
 		SessionTokenFunc:              nil, // Default behavior
 		PostAuthAdditionalHeadersFunc: options.PostAuthAdditionalHeadersFunc,
+		Logger:                        options.Logger,
+		AccessURL:                     options.AccessURL,
 	})
 	// Same as the first but it's optional.
 	apiKeyMiddlewareOptional := httpmw.ExtractAPIKeyMW(httpmw.ExtractAPIKeyConfig{
@@ -800,6 +824,8 @@ func New(options *Options) *API {
 		Optional:                      true,
 		SessionTokenFunc:              nil, // Default behavior
 		PostAuthAdditionalHeadersFunc: options.PostAuthAdditionalHeadersFunc,
+		Logger:                        options.Logger,
+		AccessURL:                     options.AccessURL,
 	})
 
 	workspaceAgentInfo := httpmw.ExtractWorkspaceAgentAndLatestBuild(httpmw.ExtractWorkspaceAgentAndLatestBuildConfig{
@@ -828,6 +854,7 @@ func New(options *Options) *API {
 
 	r.Use(
 		httpmw.Recover(api.Logger),
+		httpmw.WithProfilingLabels,
 		tracing.StatusWriterMiddleware,
 		tracing.Middleware(api.TracerProvider),
 		httpmw.AttachRequestID,
@@ -908,21 +935,33 @@ func New(options *Options) *API {
 		})
 	}
 
+	// OAuth2 metadata endpoint for RFC 8414 discovery
+	r.Get("/.well-known/oauth-authorization-server", api.oauth2AuthorizationServerMetadata())
+	// OAuth2 protected resource metadata endpoint for RFC 9728 discovery
+	r.Get("/.well-known/oauth-protected-resource", api.oauth2ProtectedResourceMetadata())
+
 	// OAuth2 linking routes do not make sense under the /api/v2 path.  These are
 	// for an external application to use Coder as an OAuth2 provider, not for
 	// logging into Coder with an external OAuth2 provider.
 	r.Route("/oauth2", func(r chi.Router) {
 		r.Use(
-			api.oAuth2ProviderMiddleware,
-			// Fetch the app as system because in the /tokens route there will be no
-			// authenticated user.
-			httpmw.AsAuthzSystem(httpmw.ExtractOAuth2ProviderApp(options.Database)),
+			httpmw.RequireExperimentWithDevBypass(api.Experiments, codersdk.ExperimentOAuth2),
 		)
 		r.Route("/authorize", func(r chi.Router) {
-			r.Use(apiKeyMiddlewareRedirect)
+			r.Use(
+				// Fetch the app as system for the authorize endpoint
+				httpmw.AsAuthzSystem(httpmw.ExtractOAuth2ProviderAppWithOAuth2Errors(options.Database)),
+				apiKeyMiddlewareRedirect,
+			)
+			// GET shows the consent page, POST processes the consent
 			r.Get("/", api.getOAuth2ProviderAppAuthorize())
+			r.Post("/", api.postOAuth2ProviderAppAuthorize())
 		})
 		r.Route("/tokens", func(r chi.Router) {
+			r.Use(
+				// Use OAuth2-compliant error responses for the tokens endpoint
+				httpmw.AsAuthzSystem(httpmw.ExtractOAuth2ProviderAppWithOAuth2Errors(options.Database)),
+			)
 			r.Group(func(r chi.Router) {
 				r.Use(apiKeyMiddleware)
 				// DELETE on /tokens is not part of the OAuth2 spec.  It is our own
@@ -933,6 +972,44 @@ func New(options *Options) *API {
 			// The POST /tokens endpoint will be called from an unauthorized client so
 			// we cannot require an API key.
 			r.Post("/", api.postOAuth2ProviderAppToken())
+		})
+
+		// RFC 7591 Dynamic Client Registration - Public endpoint
+		r.Post("/register", api.postOAuth2ClientRegistration())
+
+		// RFC 7592 Client Configuration Management - Protected by registration access token
+		r.Route("/clients/{client_id}", func(r chi.Router) {
+			r.Use(
+				// Middleware to validate registration access token
+				oauth2provider.RequireRegistrationAccessToken(api.Database),
+			)
+			r.Get("/", api.oauth2ClientConfiguration())          // Read client configuration
+			r.Put("/", api.putOAuth2ClientConfiguration())       // Update client configuration
+			r.Delete("/", api.deleteOAuth2ClientConfiguration()) // Delete client
+		})
+	})
+
+	// Experimental routes are not guaranteed to be stable and may change at any time.
+	r.Route("/api/experimental", func(r chi.Router) {
+		r.Use(apiKeyMiddleware)
+		r.Route("/aitasks", func(r chi.Router) {
+			r.Get("/prompts", api.aiTasksPrompts)
+		})
+		r.Route("/tasks", func(r chi.Router) {
+			r.Use(apiRateLimiter)
+
+			r.Route("/{user}", func(r chi.Router) {
+				r.Use(httpmw.ExtractOrganizationMembersParam(options.Database, api.HTTPAuth.Authorize))
+
+				r.Post("/", api.tasksCreate)
+			})
+		})
+		r.Route("/mcp", func(r chi.Router) {
+			r.Use(
+				httpmw.RequireExperimentWithDevBypass(api.Experiments, codersdk.ExperimentOAuth2, codersdk.ExperimentMCPServerHTTP),
+			)
+			// MCP HTTP transport endpoint with mandatory authentication
+			r.Mount("/http", api.mcpHTTPHandler())
 		})
 	})
 
@@ -965,11 +1042,10 @@ func New(options *Options) *API {
 			r.Get("/config", api.deploymentValues)
 			r.Get("/stats", api.deploymentStats)
 			r.Get("/ssh", api.sshConfig)
-			r.Get("/llms", api.deploymentLLMs)
 		})
 		r.Route("/experiments", func(r chi.Router) {
 			r.Use(apiKeyMiddleware)
-			r.Get("/available", handleExperimentsSafe)
+			r.Get("/available", handleExperimentsAvailable)
 			r.Get("/", api.handleExperimentsGet)
 		})
 		r.Get("/updatecheck", api.updateCheck)
@@ -1007,21 +1083,6 @@ func New(options *Options) *API {
 			)
 			r.Get("/{fileID}", api.fileByID)
 			r.Post("/", api.postFile)
-		})
-		// Chats are an experimental feature
-		r.Route("/chats", func(r chi.Router) {
-			r.Use(
-				apiKeyMiddleware,
-				httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentAgenticChat),
-			)
-			r.Get("/", api.listChats)
-			r.Post("/", api.postChats)
-			r.Route("/{chat}", func(r chi.Router) {
-				r.Use(httpmw.ExtractChatParam(options.Database))
-				r.Get("/", api.chat)
-				r.Get("/messages", api.chatMessages)
-				r.Post("/messages", api.postChatMessages)
-			})
 		})
 		r.Route("/external-auth", func(r chi.Router) {
 			r.Use(
@@ -1290,7 +1351,13 @@ func New(options *Options) *API {
 			).Get("/connection", api.workspaceAgentConnectionGeneric)
 			r.Route("/me", func(r chi.Router) {
 				r.Use(workspaceAgentInfo)
-				r.Get("/rpc", api.workspaceAgentRPC)
+				r.Group(func(r chi.Router) {
+					r.Use(
+						// Override the request_type for agent rpc traffic.
+						httpmw.WithStaticProfilingLabels(pprof.Labels(pproflabel.RequestTypeTag, "agent-rpc")),
+					)
+					r.Get("/rpc", api.workspaceAgentRPC)
+				})
 				r.Patch("/logs", api.patchWorkspaceAgentLogs)
 				r.Patch("/app-status", api.patchWorkspaceAgentAppStatus)
 				// Deprecated: Required to support legacy agents
@@ -1321,7 +1388,8 @@ func New(options *Options) *API {
 				r.Get("/listening-ports", api.workspaceAgentListeningPorts)
 				r.Get("/connection", api.workspaceAgentConnection)
 				r.Get("/containers", api.workspaceAgentListContainers)
-				r.Post("/containers/devcontainers/container/{container}/recreate", api.workspaceAgentRecreateDevcontainer)
+				r.Get("/containers/watch", api.watchWorkspaceAgentContainers)
+				r.Post("/containers/devcontainers/{devcontainer}/recreate", api.workspaceAgentRecreateDevcontainer)
 				r.Get("/coordinate", api.workspaceAgentClientCoordinate)
 
 				// PTY is part of workspaceAppServer.
@@ -1363,6 +1431,13 @@ func New(options *Options) *API {
 					r.Delete("/", api.deleteWorkspaceAgentPortShare)
 				})
 				r.Get("/timings", api.workspaceTimings)
+				r.Route("/acl", func(r chi.Router) {
+					r.Use(
+						httpmw.RequireExperiment(api.Experiments, codersdk.ExperimentWorkspaceSharing),
+					)
+
+					r.Patch("/", api.patchWorkspaceACL)
+				})
 			})
 		})
 		r.Route("/workspacebuilds/{workspacebuild}", func(r chi.Router) {
@@ -1447,25 +1522,25 @@ func New(options *Options) *API {
 		r.Route("/oauth2-provider", func(r chi.Router) {
 			r.Use(
 				apiKeyMiddleware,
-				api.oAuth2ProviderMiddleware,
+				httpmw.RequireExperimentWithDevBypass(api.Experiments, codersdk.ExperimentOAuth2),
 			)
 			r.Route("/apps", func(r chi.Router) {
-				r.Get("/", api.oAuth2ProviderApps)
-				r.Post("/", api.postOAuth2ProviderApp)
+				r.Get("/", api.oAuth2ProviderApps())
+				r.Post("/", api.postOAuth2ProviderApp())
 
 				r.Route("/{app}", func(r chi.Router) {
 					r.Use(httpmw.ExtractOAuth2ProviderApp(options.Database))
-					r.Get("/", api.oAuth2ProviderApp)
-					r.Put("/", api.putOAuth2ProviderApp)
-					r.Delete("/", api.deleteOAuth2ProviderApp)
+					r.Get("/", api.oAuth2ProviderApp())
+					r.Put("/", api.putOAuth2ProviderApp())
+					r.Delete("/", api.deleteOAuth2ProviderApp())
 
 					r.Route("/secrets", func(r chi.Router) {
-						r.Get("/", api.oAuth2ProviderAppSecrets)
-						r.Post("/", api.postOAuth2ProviderAppSecret)
+						r.Get("/", api.oAuth2ProviderAppSecrets())
+						r.Post("/", api.postOAuth2ProviderAppSecret())
 
 						r.Route("/{secretID}", func(r chi.Router) {
 							r.Use(httpmw.ExtractOAuth2ProviderAppSecret(options.Database))
-							r.Delete("/", api.deleteOAuth2ProviderAppSecret)
+							r.Delete("/", api.deleteOAuth2ProviderAppSecret())
 						})
 					})
 				})
@@ -1533,17 +1608,27 @@ func New(options *Options) *API {
 	// Add CSP headers to all static assets and pages. CSP headers only affect
 	// browsers, so these don't make sense on api routes.
 	cspMW := httpmw.CSPHeaders(
-		api.Experiments,
-		options.Telemetry.Enabled(), func() []string {
+		options.Telemetry.Enabled(), func() []*proxyhealth.ProxyHost {
 			if api.DeploymentValues.Dangerous.AllowAllCors {
-				// In this mode, allow all external requests
-				return []string{"*"}
+				// In this mode, allow all external requests.
+				return []*proxyhealth.ProxyHost{
+					{
+						Host:    "*",
+						AppHost: "*",
+					},
+				}
+			}
+			// Always add the primary, since the app host may be on a sub-domain.
+			proxies := []*proxyhealth.ProxyHost{
+				{
+					Host:    api.AccessURL.Host,
+					AppHost: appurl.ConvertAppHostForCSP(api.AccessURL.Host, api.AppHostname),
+				},
 			}
 			if f := api.WorkspaceProxyHostsFn.Load(); f != nil {
-				return (*f)()
+				proxies = append(proxies, (*f)()...)
 			}
-			// By default we do not add extra websocket connections to the CSP
-			return []string{}
+			return proxies
 		}, additionalCSPHeaders)
 
 	// Static file handler must be wrapped with HSTS handler if the
@@ -1572,6 +1657,7 @@ type API struct {
 	// specific replica.
 	ID                                uuid.UUID
 	Auditor                           atomic.Pointer[audit.Auditor]
+	ConnectionLogger                  atomic.Pointer[connectionlog.ConnectionLogger]
 	WorkspaceClientCoordinateOverride atomic.Pointer[func(rw http.ResponseWriter) bool]
 	TailnetCoordinator                atomic.Pointer[tailnet.Coordinator]
 	NetworkTelemetryBatcher           *tailnet.NetworkTelemetryBatcher
@@ -1582,7 +1668,7 @@ type API struct {
 	AppearanceFetcher atomic.Pointer[appearance.Fetcher]
 	// WorkspaceProxyHostsFn returns the hosts of healthy workspace proxies
 	// for header reasons.
-	WorkspaceProxyHostsFn atomic.Pointer[func() []string]
+	WorkspaceProxyHostsFn atomic.Pointer[func() []*proxyhealth.ProxyHost]
 	// TemplateScheduleStore is a pointer to an atomic pointer because this is
 	// passed to another struct, and we want them all to be the same reference.
 	TemplateScheduleStore *atomic.Pointer[schedule.TemplateScheduleStore]
@@ -1598,6 +1684,9 @@ type API struct {
 	FileCache           *files.Cache
 	PrebuildsClaimer    atomic.Pointer[prebuilds.Claimer]
 	PrebuildsReconciler atomic.Pointer[prebuilds.ReconciliationOrchestrator]
+	// BuildUsageChecker is a pointer as it's passed around to multiple
+	// components.
+	BuildUsageChecker *atomic.Pointer[wsbuilder.UsageChecker]
 
 	UpdatesProvider tailnet.WorkspaceUpdatesProvider
 
@@ -1881,7 +1970,9 @@ func ReadExperiments(log slog.Logger, raw []string) codersdk.Experiments {
 			exps = append(exps, codersdk.ExperimentsSafe...)
 		default:
 			ex := codersdk.Experiment(strings.ToLower(v))
-			if !slice.Contains(codersdk.ExperimentsSafe, ex) {
+			if !slice.Contains(codersdk.ExperimentsKnown, ex) {
+				log.Warn(context.Background(), "ignoring unknown experiment", slog.F("experiment", ex))
+			} else if !slice.Contains(codersdk.ExperimentsSafe, ex) {
 				log.Warn(context.Background(), "🐉 HERE BE DRAGONS: opting into hidden experiment", slog.F("experiment", ex))
 			}
 			exps = append(exps, ex)

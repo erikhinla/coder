@@ -50,6 +50,7 @@ type customQuerier interface {
 	workspaceQuerier
 	userQuerier
 	auditLogQuerier
+	connectionLogQuerier
 }
 
 type templateQuerier interface {
@@ -80,6 +81,9 @@ func (q *sqlQuerier) GetAuthorizedTemplates(ctx context.Context, arg GetTemplate
 		arg.FuzzyName,
 		pq.Array(arg.IDs),
 		arg.Deprecated,
+		arg.HasAITask,
+		arg.AuthorID,
+		arg.AuthorUsername,
 	)
 	if err != nil {
 		return nil, err
@@ -118,6 +122,7 @@ func (q *sqlQuerier) GetAuthorizedTemplates(ctx context.Context, arg GetTemplate
 			&i.ActivityBump,
 			&i.MaxPortSharingLevel,
 			&i.UseClassicParameterFlow,
+			&i.CorsBehavior,
 			&i.CreatedByAvatarURL,
 			&i.CreatedByUsername,
 			&i.CreatedByName,
@@ -225,6 +230,7 @@ func (q *sqlQuerier) GetTemplateGroupRoles(ctx context.Context, id uuid.UUID) ([
 type workspaceQuerier interface {
 	GetAuthorizedWorkspaces(ctx context.Context, arg GetWorkspacesParams, prepared rbac.PreparedAuthorized) ([]GetWorkspacesRow, error)
 	GetAuthorizedWorkspacesAndAgentsByOwnerID(ctx context.Context, ownerID uuid.UUID, prepared rbac.PreparedAuthorized) ([]GetWorkspacesAndAgentsByOwnerIDRow, error)
+	GetAuthorizedWorkspaceBuildParametersByBuildIDs(ctx context.Context, workspaceBuildIDs []uuid.UUID, prepared rbac.PreparedAuthorized) ([]WorkspaceBuildParameter, error)
 }
 
 // GetAuthorizedWorkspaces returns all workspaces that the user is authorized to access.
@@ -264,6 +270,7 @@ func (q *sqlQuerier) GetAuthorizedWorkspaces(ctx context.Context, arg GetWorkspa
 		arg.LastUsedBefore,
 		arg.LastUsedAfter,
 		arg.UsingActive,
+		arg.HasAITask,
 		arg.RequesterID,
 		arg.Offset,
 		arg.Limit,
@@ -293,6 +300,8 @@ func (q *sqlQuerier) GetAuthorizedWorkspaces(ctx context.Context, arg GetWorkspa
 			&i.AutomaticUpdates,
 			&i.Favorite,
 			&i.NextStartAt,
+			&i.GroupACL,
+			&i.UserACL,
 			&i.OwnerAvatarUrl,
 			&i.OwnerUsername,
 			&i.OwnerName,
@@ -311,6 +320,7 @@ func (q *sqlQuerier) GetAuthorizedWorkspaces(ctx context.Context, arg GetWorkspa
 			&i.LatestBuildError,
 			&i.LatestBuildTransition,
 			&i.LatestBuildStatus,
+			&i.LatestBuildHasAITask,
 			&i.Count,
 		); err != nil {
 			return nil, err
@@ -365,6 +375,35 @@ func (q *sqlQuerier) GetAuthorizedWorkspacesAndAgentsByOwnerID(ctx context.Conte
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	return items, nil
+}
+
+func (q *sqlQuerier) GetAuthorizedWorkspaceBuildParametersByBuildIDs(ctx context.Context, workspaceBuildIDs []uuid.UUID, prepared rbac.PreparedAuthorized) ([]WorkspaceBuildParameter, error) {
+	authorizedFilter, err := prepared.CompileToSQL(ctx, rbac.ConfigWorkspaces())
+	if err != nil {
+		return nil, xerrors.Errorf("compile authorized filter: %w", err)
+	}
+
+	filtered, err := insertAuthorizedFilter(getWorkspaceBuildParametersByBuildIDs, fmt.Sprintf(" AND %s", authorizedFilter))
+	if err != nil {
+		return nil, xerrors.Errorf("insert authorized filter: %w", err)
+	}
+
+	query := fmt.Sprintf("-- name: GetAuthorizedWorkspaceBuildParametersByBuildIDs :many\n%s", filtered)
+	rows, err := q.db.QueryContext(ctx, query, pq.Array(workspaceBuildIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []WorkspaceBuildParameter
+	for rows.Next() {
+		var i WorkspaceBuildParameter
+		if err := rows.Scan(&i.WorkspaceBuildID, &i.Name, &i.Value); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	return items, nil
 }
@@ -445,6 +484,7 @@ func (q *sqlQuerier) GetAuthorizedUsers(ctx context.Context, arg GetUsersParams,
 
 type auditLogQuerier interface {
 	GetAuthorizedAuditLogsOffset(ctx context.Context, arg GetAuditLogsOffsetParams, prepared rbac.PreparedAuthorized) ([]GetAuditLogsOffsetRow, error)
+	CountAuthorizedAuditLogs(ctx context.Context, arg CountAuditLogsParams, prepared rbac.PreparedAuthorized) (int64, error)
 }
 
 func (q *sqlQuerier) GetAuthorizedAuditLogsOffset(ctx context.Context, arg GetAuditLogsOffsetParams, prepared rbac.PreparedAuthorized) ([]GetAuditLogsOffsetRow, error) {
@@ -515,7 +555,6 @@ func (q *sqlQuerier) GetAuthorizedAuditLogsOffset(ctx context.Context, arg GetAu
 			&i.OrganizationName,
 			&i.OrganizationDisplayName,
 			&i.OrganizationIcon,
-			&i.Count,
 		); err != nil {
 			return nil, err
 		}
@@ -528,6 +567,190 @@ func (q *sqlQuerier) GetAuthorizedAuditLogsOffset(ctx context.Context, arg GetAu
 		return nil, err
 	}
 	return items, nil
+}
+
+func (q *sqlQuerier) CountAuthorizedAuditLogs(ctx context.Context, arg CountAuditLogsParams, prepared rbac.PreparedAuthorized) (int64, error) {
+	authorizedFilter, err := prepared.CompileToSQL(ctx, regosql.ConvertConfig{
+		VariableConverter: regosql.AuditLogConverter(),
+	})
+	if err != nil {
+		return 0, xerrors.Errorf("compile authorized filter: %w", err)
+	}
+
+	filtered, err := insertAuthorizedFilter(countAuditLogs, fmt.Sprintf(" AND %s", authorizedFilter))
+	if err != nil {
+		return 0, xerrors.Errorf("insert authorized filter: %w", err)
+	}
+
+	query := fmt.Sprintf("-- name: CountAuthorizedAuditLogs :one\n%s", filtered)
+
+	rows, err := q.db.QueryContext(ctx, query,
+		arg.ResourceType,
+		arg.ResourceID,
+		arg.OrganizationID,
+		arg.ResourceTarget,
+		arg.Action,
+		arg.UserID,
+		arg.Username,
+		arg.Email,
+		arg.DateFrom,
+		arg.DateTo,
+		arg.BuildReason,
+		arg.RequestID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int64
+	for rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+type connectionLogQuerier interface {
+	GetAuthorizedConnectionLogsOffset(ctx context.Context, arg GetConnectionLogsOffsetParams, prepared rbac.PreparedAuthorized) ([]GetConnectionLogsOffsetRow, error)
+	CountAuthorizedConnectionLogs(ctx context.Context, arg CountConnectionLogsParams, prepared rbac.PreparedAuthorized) (int64, error)
+}
+
+func (q *sqlQuerier) GetAuthorizedConnectionLogsOffset(ctx context.Context, arg GetConnectionLogsOffsetParams, prepared rbac.PreparedAuthorized) ([]GetConnectionLogsOffsetRow, error) {
+	authorizedFilter, err := prepared.CompileToSQL(ctx, regosql.ConvertConfig{
+		VariableConverter: regosql.ConnectionLogConverter(),
+	})
+	if err != nil {
+		return nil, xerrors.Errorf("compile authorized filter: %w", err)
+	}
+	filtered, err := insertAuthorizedFilter(getConnectionLogsOffset, fmt.Sprintf(" AND %s", authorizedFilter))
+	if err != nil {
+		return nil, xerrors.Errorf("insert authorized filter: %w", err)
+	}
+
+	query := fmt.Sprintf("-- name: GetAuthorizedConnectionLogsOffset :many\n%s", filtered)
+	rows, err := q.db.QueryContext(ctx, query,
+		arg.OrganizationID,
+		arg.WorkspaceOwner,
+		arg.WorkspaceOwnerID,
+		arg.WorkspaceOwnerEmail,
+		arg.Type,
+		arg.UserID,
+		arg.Username,
+		arg.UserEmail,
+		arg.ConnectedAfter,
+		arg.ConnectedBefore,
+		arg.WorkspaceID,
+		arg.ConnectionID,
+		arg.Status,
+		arg.OffsetOpt,
+		arg.LimitOpt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetConnectionLogsOffsetRow
+	for rows.Next() {
+		var i GetConnectionLogsOffsetRow
+		if err := rows.Scan(
+			&i.ConnectionLog.ID,
+			&i.ConnectionLog.ConnectTime,
+			&i.ConnectionLog.OrganizationID,
+			&i.ConnectionLog.WorkspaceOwnerID,
+			&i.ConnectionLog.WorkspaceID,
+			&i.ConnectionLog.WorkspaceName,
+			&i.ConnectionLog.AgentName,
+			&i.ConnectionLog.Type,
+			&i.ConnectionLog.Ip,
+			&i.ConnectionLog.Code,
+			&i.ConnectionLog.UserAgent,
+			&i.ConnectionLog.UserID,
+			&i.ConnectionLog.SlugOrPort,
+			&i.ConnectionLog.ConnectionID,
+			&i.ConnectionLog.DisconnectTime,
+			&i.ConnectionLog.DisconnectReason,
+			&i.UserUsername,
+			&i.UserName,
+			&i.UserEmail,
+			&i.UserCreatedAt,
+			&i.UserUpdatedAt,
+			&i.UserLastSeenAt,
+			&i.UserStatus,
+			&i.UserLoginType,
+			&i.UserRoles,
+			&i.UserAvatarUrl,
+			&i.UserDeleted,
+			&i.UserQuietHoursSchedule,
+			&i.WorkspaceOwnerUsername,
+			&i.OrganizationName,
+			&i.OrganizationDisplayName,
+			&i.OrganizationIcon,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (q *sqlQuerier) CountAuthorizedConnectionLogs(ctx context.Context, arg CountConnectionLogsParams, prepared rbac.PreparedAuthorized) (int64, error) {
+	authorizedFilter, err := prepared.CompileToSQL(ctx, regosql.ConvertConfig{
+		VariableConverter: regosql.ConnectionLogConverter(),
+	})
+	if err != nil {
+		return 0, xerrors.Errorf("compile authorized filter: %w", err)
+	}
+	filtered, err := insertAuthorizedFilter(countConnectionLogs, fmt.Sprintf(" AND %s", authorizedFilter))
+	if err != nil {
+		return 0, xerrors.Errorf("insert authorized filter: %w", err)
+	}
+
+	query := fmt.Sprintf("-- name: CountAuthorizedConnectionLogs :one\n%s", filtered)
+	rows, err := q.db.QueryContext(ctx, query,
+		arg.OrganizationID,
+		arg.WorkspaceOwner,
+		arg.WorkspaceOwnerID,
+		arg.WorkspaceOwnerEmail,
+		arg.Type,
+		arg.UserID,
+		arg.Username,
+		arg.UserEmail,
+		arg.ConnectedAfter,
+		arg.ConnectedBefore,
+		arg.WorkspaceID,
+		arg.ConnectionID,
+		arg.Status,
+	)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	var count int64
+	for rows.Next() {
+		if err := rows.Scan(&count); err != nil {
+			return 0, err
+		}
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	return count, nil
 }
 
 func insertAuthorizedFilter(query string, replaceWith string) (string, error) {

@@ -1,6 +1,6 @@
-import type { Meta, StoryObj } from "@storybook/react";
-import { userEvent, within } from "@storybook/test";
+import type { Meta, StoryObj } from "@storybook/react-vite";
 import type { WorkspaceAppStatus } from "api/typesGenerated";
+import { userEvent, within } from "storybook/test";
 import {
 	MockWorkspace,
 	MockWorkspaceAgent,
@@ -42,6 +42,40 @@ export const WorkingState: Story = {
 				created_at: createTimestamp(5, 15), // 15:05:15 (after referenceDate)
 				uri: "",
 				state: "working" as const,
+			},
+			...MockWorkspaceAppStatuses,
+		]),
+	},
+};
+
+export const IdleState: Story = {
+	args: {
+		agent: mockAgent([
+			{
+				...MockWorkspaceAppStatus,
+				id: "status-8",
+				icon: "",
+				message: "Done for now",
+				created_at: createTimestamp(5, 20),
+				uri: "",
+				state: "idle" as const,
+			},
+			...MockWorkspaceAppStatuses,
+		]),
+	},
+};
+
+export const NoMessage: Story = {
+	args: {
+		agent: mockAgent([
+			{
+				...MockWorkspaceAppStatus,
+				id: "status-8",
+				icon: "",
+				message: "",
+				created_at: createTimestamp(5, 20),
+				uri: "",
+				state: "idle" as const,
 			},
 			...MockWorkspaceAppStatuses,
 		]),

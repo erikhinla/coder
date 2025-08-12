@@ -91,20 +91,6 @@ JOIN
 	 workspace_build_with_user AS wb
 ON m.workspace_id = wb.workspace_id AND m.max_build_number = wb.build_number;
 
--- name: GetLatestWorkspaceBuilds :many
-SELECT wb.*
-FROM (
-    SELECT
-        workspace_id, MAX(build_number) as max_build_number
-    FROM
-		workspace_build_with_user AS workspace_builds
-    GROUP BY
-        workspace_id
-) m
-JOIN
-	 workspace_build_with_user AS wb
-ON m.workspace_id = wb.workspace_id AND m.max_build_number = wb.build_number;
-
 -- name: InsertWorkspaceBuild :exec
 INSERT INTO
 	workspace_builds (
@@ -121,11 +107,10 @@ INSERT INTO
 		deadline,
 		max_deadline,
 		reason,
-		template_version_preset_id,
-		has_ai_task
+		template_version_preset_id
 	)
 VALUES
-	($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
+	($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
 
 -- name: UpdateWorkspaceBuildCostByID :exec
 UPDATE
@@ -149,6 +134,15 @@ UPDATE
 	workspace_builds
 SET
 	provisioner_state = @provisioner_state::bytea,
+	updated_at = @updated_at::timestamptz
+WHERE id = @id::uuid;
+
+-- name: UpdateWorkspaceBuildAITaskByID :exec
+UPDATE
+	workspace_builds
+SET
+	has_ai_task = @has_ai_task,
+	ai_task_sidebar_app_id = @sidebar_app_id,
 	updated_at = @updated_at::timestamptz
 WHERE id = @id::uuid;
 

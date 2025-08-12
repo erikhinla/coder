@@ -11,27 +11,27 @@ import (
 	"testing"
 	"time"
 
+	"github.com/brianvoe/gofakeit/v7"
 	"github.com/google/uuid"
 	"github.com/sqlc-dev/pqtype"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 	"golang.org/x/xerrors"
 
 	"cdr.dev/slog"
-
-	"github.com/coder/coder/v2/coderd/database/db2sdk"
-	"github.com/coder/coder/v2/coderd/database/dbmem"
-	"github.com/coder/coder/v2/coderd/notifications"
-	"github.com/coder/coder/v2/coderd/rbac/policy"
-	"github.com/coder/coder/v2/codersdk"
-
 	"github.com/coder/coder/v2/coderd/coderdtest"
 	"github.com/coder/coder/v2/coderd/database"
+	"github.com/coder/coder/v2/coderd/database/db2sdk"
 	"github.com/coder/coder/v2/coderd/database/dbauthz"
 	"github.com/coder/coder/v2/coderd/database/dbgen"
+	"github.com/coder/coder/v2/coderd/database/dbmock"
 	"github.com/coder/coder/v2/coderd/database/dbtestutil"
 	"github.com/coder/coder/v2/coderd/database/dbtime"
+	"github.com/coder/coder/v2/coderd/notifications"
 	"github.com/coder/coder/v2/coderd/rbac"
+	"github.com/coder/coder/v2/coderd/rbac/policy"
 	"github.com/coder/coder/v2/coderd/util/slice"
+	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/provisionersdk"
 	"github.com/coder/coder/v2/testutil"
 )
@@ -207,14 +207,15 @@ func defaultIPAddress() pqtype.Inet {
 }
 
 func (s *MethodTestSuite) TestAPIKey() {
-	s.Run("DeleteAPIKeyByID", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		key, _ := dbgen.APIKey(s.T(), db, database.APIKey{})
+	s.Run("DeleteAPIKeyByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.APIKey{})
+		dbm.EXPECT().GetAPIKeyByID(gomock.Any(), key.ID).Return(key, nil).AnyTimes()
+		dbm.EXPECT().DeleteAPIKeyByID(gomock.Any(), key.ID).Return(nil).AnyTimes()
 		check.Args(key.ID).Asserts(key, policy.ActionDelete).Returns()
 	}))
-	s.Run("GetAPIKeyByID", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		key, _ := dbgen.APIKey(s.T(), db, database.APIKey{})
+	s.Run("GetAPIKeyByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.APIKey{})
+		dbm.EXPECT().GetAPIKeyByID(gomock.Any(), key.ID).Return(key, nil).AnyTimes()
 		check.Args(key.ID).Asserts(key, policy.ActionRead).Returns(key)
 	}))
 	s.Run("GetAPIKeyByName", s.Subtest(func(db database.Store, check *expects) {
@@ -237,14 +238,12 @@ func (s *MethodTestSuite) TestAPIKey() {
 			Asserts(a, policy.ActionRead, b, policy.ActionRead).
 			Returns(slice.New(a, b))
 	}))
-	s.Run("GetAPIKeysByUserID", s.Subtest(func(db database.Store, check *expects) {
-		u1 := dbgen.User(s.T(), db, database.User{})
-		u2 := dbgen.User(s.T(), db, database.User{})
+	s.Run("GetAPIKeysByUserID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u1 := testutil.Fake(s.T(), faker, database.User{})
+		keyA := testutil.Fake(s.T(), faker, database.APIKey{UserID: u1.ID, LoginType: database.LoginTypeToken, TokenName: "key-a"})
+		keyB := testutil.Fake(s.T(), faker, database.APIKey{UserID: u1.ID, LoginType: database.LoginTypeToken, TokenName: "key-b"})
 
-		keyA, _ := dbgen.APIKey(s.T(), db, database.APIKey{UserID: u1.ID, LoginType: database.LoginTypeToken, TokenName: "key-a"})
-		keyB, _ := dbgen.APIKey(s.T(), db, database.APIKey{UserID: u1.ID, LoginType: database.LoginTypeToken, TokenName: "key-b"})
-		_, _ = dbgen.APIKey(s.T(), db, database.APIKey{UserID: u2.ID, LoginType: database.LoginTypeToken})
-
+		dbm.EXPECT().GetAPIKeysByUserID(gomock.Any(), gomock.Any()).Return(slice.New(keyA, keyB), nil).AnyTimes()
 		check.Args(database.GetAPIKeysByUserIDParams{LoginType: database.LoginTypeToken, UserID: u1.ID}).
 			Asserts(keyA, policy.ActionRead, keyB, policy.ActionRead).
 			Returns(slice.New(keyA, keyB))
@@ -326,6 +325,125 @@ func (s *MethodTestSuite) TestAuditLogs() {
 		check.Args(database.GetAuditLogsOffsetParams{
 			LimitOpt: 10,
 		}, emptyPreparedAuthorized{}).Asserts(rbac.ResourceAuditLog, policy.ActionRead)
+	}))
+	s.Run("CountAuditLogs", s.Subtest(func(db database.Store, check *expects) {
+		_ = dbgen.AuditLog(s.T(), db, database.AuditLog{})
+		_ = dbgen.AuditLog(s.T(), db, database.AuditLog{})
+		check.Args(database.CountAuditLogsParams{}).Asserts(rbac.ResourceAuditLog, policy.ActionRead).WithNotAuthorized("nil")
+	}))
+	s.Run("CountAuthorizedAuditLogs", s.Subtest(func(db database.Store, check *expects) {
+		_ = dbgen.AuditLog(s.T(), db, database.AuditLog{})
+		_ = dbgen.AuditLog(s.T(), db, database.AuditLog{})
+		check.Args(database.CountAuditLogsParams{}, emptyPreparedAuthorized{}).Asserts(rbac.ResourceAuditLog, policy.ActionRead)
+	}))
+	s.Run("DeleteOldAuditLogConnectionEvents", s.Subtest(func(db database.Store, check *expects) {
+		_ = dbgen.AuditLog(s.T(), db, database.AuditLog{})
+		check.Args(database.DeleteOldAuditLogConnectionEventsParams{}).Asserts(rbac.ResourceSystem, policy.ActionDelete)
+	}))
+}
+
+func (s *MethodTestSuite) TestConnectionLogs() {
+	createWorkspace := func(t *testing.T, db database.Store) database.WorkspaceTable {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		return dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			ID:               uuid.New(),
+			OwnerID:          u.ID,
+			OrganizationID:   o.ID,
+			AutomaticUpdates: database.AutomaticUpdatesNever,
+			TemplateID:       tpl.ID,
+		})
+	}
+	s.Run("UpsertConnectionLog", s.Subtest(func(db database.Store, check *expects) {
+		ws := createWorkspace(s.T(), db)
+		check.Args(database.UpsertConnectionLogParams{
+			Ip:               defaultIPAddress(),
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			ConnectionStatus: database.ConnectionStatusConnected,
+			WorkspaceOwnerID: ws.OwnerID,
+		}).Asserts(rbac.ResourceConnectionLog, policy.ActionUpdate)
+	}))
+	s.Run("GetConnectionLogsOffset", s.Subtest(func(db database.Store, check *expects) {
+		ws := createWorkspace(s.T(), db)
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Ip:               defaultIPAddress(),
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Ip:               defaultIPAddress(),
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		check.Args(database.GetConnectionLogsOffsetParams{
+			LimitOpt: 10,
+		}).Asserts(rbac.ResourceConnectionLog, policy.ActionRead).WithNotAuthorized("nil")
+	}))
+	s.Run("GetAuthorizedConnectionLogsOffset", s.Subtest(func(db database.Store, check *expects) {
+		ws := createWorkspace(s.T(), db)
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Ip:               defaultIPAddress(),
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Ip:               defaultIPAddress(),
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		check.Args(database.GetConnectionLogsOffsetParams{
+			LimitOpt: 10,
+		}, emptyPreparedAuthorized{}).Asserts(rbac.ResourceConnectionLog, policy.ActionRead)
+	}))
+	s.Run("CountConnectionLogs", s.Subtest(func(db database.Store, check *expects) {
+		ws := createWorkspace(s.T(), db)
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		check.Args(database.CountConnectionLogsParams{}).Asserts(
+			rbac.ResourceConnectionLog, policy.ActionRead,
+		).WithNotAuthorized("nil")
+	}))
+	s.Run("CountAuthorizedConnectionLogs", s.Subtest(func(db database.Store, check *expects) {
+		ws := createWorkspace(s.T(), db)
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		_ = dbgen.ConnectionLog(s.T(), db, database.UpsertConnectionLogParams{
+			Type:             database.ConnectionTypeSsh,
+			WorkspaceID:      ws.ID,
+			OrganizationID:   ws.OrganizationID,
+			WorkspaceOwnerID: ws.OwnerID,
+		})
+		check.Args(database.CountConnectionLogsParams{}, emptyPreparedAuthorized{}).Asserts(
+			rbac.ResourceConnectionLog, policy.ActionRead,
+		)
 	}))
 }
 
@@ -506,6 +624,11 @@ func (s *MethodTestSuite) TestGroup() {
 		check.Args(database.UpdateGroupByIDParams{
 			ID: g.ID,
 		}).Asserts(g, policy.ActionUpdate)
+	}))
+	s.Run("ValidateGroupIDs", s.Subtest(func(db database.Store, check *expects) {
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		g := dbgen.Group(s.T(), db, database.Group{OrganizationID: o.ID})
+		check.Args([]uuid.UUID{g.ID}).Asserts(rbac.ResourceSystem, policy.ActionRead)
 	}))
 }
 
@@ -785,6 +908,14 @@ func (s *MethodTestSuite) TestLicense() {
 		require.NoError(s.T(), err)
 		check.Args().Asserts().Returns("value")
 	}))
+	s.Run("GetManagedAgentCount", s.Subtest(func(db database.Store, check *expects) {
+		start := dbtime.Now()
+		end := start.Add(time.Hour)
+		check.Args(database.GetManagedAgentCountParams{
+			StartTime: start,
+			EndTime:   end,
+		}).Asserts(rbac.ResourceWorkspace, policy.ActionRead).Returns(int64(0))
+	}))
 }
 
 func (s *MethodTestSuite) TestOrganization() {
@@ -978,6 +1109,28 @@ func (s *MethodTestSuite) TestOrganization() {
 			Values:                  []string{"test"},
 		}
 		check.Args(insertPresetParametersParams).Asserts(rbac.ResourceTemplate, policy.ActionUpdate)
+	}))
+	s.Run("InsertPresetPrebuildSchedule", s.Subtest(func(db database.Store, check *expects) {
+		org := dbgen.Organization(s.T(), db, database.Organization{})
+		user := dbgen.User(s.T(), db, database.User{})
+		template := dbgen.Template(s.T(), db, database.Template{
+			CreatedBy:      user.ID,
+			OrganizationID: org.ID,
+		})
+		templateVersion := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID:     uuid.NullUUID{UUID: template.ID, Valid: true},
+			OrganizationID: org.ID,
+			CreatedBy:      user.ID,
+		})
+		preset := dbgen.Preset(s.T(), db, database.InsertPresetParams{
+			TemplateVersionID: templateVersion.ID,
+			Name:              "test",
+		})
+		arg := database.InsertPresetPrebuildScheduleParams{
+			PresetID: preset.ID,
+		}
+		check.Args(arg).
+			Asserts(rbac.ResourceTemplate, policy.ActionUpdate)
 	}))
 	s.Run("DeleteOrganizationMember", s.Subtest(func(db database.Store, check *expects) {
 		o := dbgen.Organization(s.T(), db, database.Organization{})
@@ -1290,6 +1443,20 @@ func (s *MethodTestSuite) TestTemplate() {
 		})
 		check.Args(now.Add(-time.Hour)).Asserts(rbac.ResourceTemplate.All(), policy.ActionRead)
 	}))
+	s.Run("GetTemplateVersionHasAITask", s.Subtest(func(db database.Store, check *expects) {
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		u := dbgen.User(s.T(), db, database.User{})
+		t := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		tv := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			OrganizationID: o.ID,
+			TemplateID:     uuid.NullUUID{UUID: t.ID, Valid: true},
+			CreatedBy:      u.ID,
+		})
+		check.Args(tv.ID).Asserts(t, policy.ActionRead)
+	}))
 	s.Run("GetTemplatesWithFilter", s.Subtest(func(db database.Store, check *expects) {
 		o := dbgen.Organization(s.T(), db, database.Organization{})
 		u := dbgen.User(s.T(), db, database.User{})
@@ -1316,6 +1483,7 @@ func (s *MethodTestSuite) TestTemplate() {
 			Provisioner:         "echo",
 			OrganizationID:      orgID,
 			MaxPortSharingLevel: database.AppSharingLevelOwner,
+			CorsBehavior:        database.CorsBehaviorSimple,
 		}).Asserts(rbac.ResourceTemplate.InOrg(orgID), policy.ActionCreate)
 	}))
 	s.Run("InsertTemplateVersion", s.Subtest(func(db database.Store, check *expects) {
@@ -1369,6 +1537,24 @@ func (s *MethodTestSuite) TestTemplate() {
 			ID: t1.ID,
 		}).Asserts(t1, policy.ActionUpdate)
 	}))
+	s.Run("UpdateTemplateVersionAITaskByJobID", s.Subtest(func(db database.Store, check *expects) {
+		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		u := dbgen.User(s.T(), db, database.User{})
+		_ = dbgen.OrganizationMember(s.T(), db, database.OrganizationMember{OrganizationID: o.ID, UserID: u.ID})
+		t := dbgen.Template(s.T(), db, database.Template{OrganizationID: o.ID, CreatedBy: u.ID})
+		job := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{OrganizationID: o.ID})
+		_ = dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+			JobID:          job.ID,
+			TemplateID:     uuid.NullUUID{UUID: t.ID, Valid: true},
+		})
+		check.Args(database.UpdateTemplateVersionAITaskByJobIDParams{
+			JobID:     job.ID,
+			HasAITask: sql.NullBool{Bool: true, Valid: true},
+		}).Asserts(t, policy.ActionUpdate)
+	}))
 	s.Run("UpdateTemplateWorkspacesLastUsedAt", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		t1 := dbgen.Template(s.T(), db, database.Template{})
@@ -1418,6 +1604,7 @@ func (s *MethodTestSuite) TestTemplate() {
 		check.Args(database.UpdateTemplateMetaByIDParams{
 			ID:                  t1.ID,
 			MaxPortSharingLevel: "owner",
+			CorsBehavior:        database.CorsBehaviorSimple,
 		}).Asserts(t1, policy.ActionUpdate)
 	}))
 	s.Run("UpdateTemplateVersionByID", s.Subtest(func(db database.Store, check *expects) {
@@ -1506,315 +1693,253 @@ func (s *MethodTestSuite) TestTemplate() {
 }
 
 func (s *MethodTestSuite) TestUser() {
-	s.Run("GetAuthorizedUsers", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		dbgen.User(s.T(), db, database.User{})
+	s.Run("GetAuthorizedUsers", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.GetUsersParams{}
+		dbm.EXPECT().GetAuthorizedUsers(gomock.Any(), arg, gomock.Any()).Return([]database.GetUsersRow{}, nil).AnyTimes()
 		// No asserts because SQLFilter.
-		check.Args(database.GetUsersParams{}, emptyPreparedAuthorized{}).
-			Asserts()
+		check.Args(arg, emptyPreparedAuthorized{}).Asserts()
 	}))
-	s.Run("DeleteAPIKeysByUserID", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(u.ID).Asserts(rbac.ResourceApiKey.WithOwner(u.ID.String()), policy.ActionDelete).Returns()
+	s.Run("DeleteAPIKeysByUserID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.APIKey{})
+		dbm.EXPECT().DeleteAPIKeysByUserID(gomock.Any(), key.UserID).Return(nil).AnyTimes()
+		check.Args(key.UserID).Asserts(rbac.ResourceApiKey.WithOwner(key.UserID.String()), policy.ActionDelete).Returns()
 	}))
-	s.Run("GetQuotaAllowanceForUser", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.GetQuotaAllowanceForUserParams{
-			UserID:         u.ID,
-			OrganizationID: uuid.New(),
-		}).Asserts(u, policy.ActionRead).Returns(int64(0))
+	s.Run("GetQuotaAllowanceForUser", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.GetQuotaAllowanceForUserParams{UserID: u.ID, OrganizationID: uuid.New()}
+		dbm.EXPECT().GetQuotaAllowanceForUser(gomock.Any(), arg).Return(int64(0), nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionRead).Returns(int64(0))
 	}))
-	s.Run("GetQuotaConsumedForUser", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.GetQuotaConsumedForUserParams{
-			OwnerID:        u.ID,
-			OrganizationID: uuid.New(),
-		}).Asserts(u, policy.ActionRead).Returns(int64(0))
+	s.Run("GetQuotaConsumedForUser", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.GetQuotaConsumedForUserParams{OwnerID: u.ID, OrganizationID: uuid.New()}
+		dbm.EXPECT().GetQuotaConsumedForUser(gomock.Any(), arg).Return(int64(0), nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionRead).Returns(int64(0))
 	}))
-	s.Run("GetUserByEmailOrUsername", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.GetUserByEmailOrUsernameParams{
-			Username: u.Username,
-			Email:    u.Email,
-		}).Asserts(u, policy.ActionRead).Returns(u)
+	s.Run("GetUserByEmailOrUsername", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.GetUserByEmailOrUsernameParams{Email: u.Email}
+		dbm.EXPECT().GetUserByEmailOrUsername(gomock.Any(), arg).Return(u, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionRead).Returns(u)
 	}))
-	s.Run("GetUserByID", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
+	s.Run("GetUserByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
 		check.Args(u.ID).Asserts(u, policy.ActionRead).Returns(u)
 	}))
-	s.Run("GetUsersByIDs", s.Subtest(func(db database.Store, check *expects) {
-		a := dbgen.User(s.T(), db, database.User{CreatedAt: dbtime.Now().Add(-time.Hour)})
-		b := dbgen.User(s.T(), db, database.User{CreatedAt: dbtime.Now()})
-		check.Args([]uuid.UUID{a.ID, b.ID}).
-			Asserts(a, policy.ActionRead, b, policy.ActionRead).
-			Returns(slice.New(a, b))
+	s.Run("GetUsersByIDs", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		a := testutil.Fake(s.T(), faker, database.User{CreatedAt: dbtime.Now().Add(-time.Hour)})
+		b := testutil.Fake(s.T(), faker, database.User{CreatedAt: dbtime.Now()})
+		ids := []uuid.UUID{a.ID, b.ID}
+		dbm.EXPECT().GetUsersByIDs(gomock.Any(), ids).Return([]database.User{a, b}, nil).AnyTimes()
+		check.Args(ids).Asserts(a, policy.ActionRead, b, policy.ActionRead).Returns(slice.New(a, b))
 	}))
-	s.Run("GetUsers", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		dbgen.User(s.T(), db, database.User{Username: "GetUsers-a-user"})
-		dbgen.User(s.T(), db, database.User{Username: "GetUsers-b-user"})
-		check.Args(database.GetUsersParams{}).
-			// Asserts are done in a SQL filter
-			Asserts()
+	s.Run("GetUsers", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.GetUsersParams{}
+		dbm.EXPECT().GetAuthorizedUsers(gomock.Any(), arg, gomock.Any()).Return([]database.GetUsersRow{}, nil).AnyTimes()
+		// Asserts are done in a SQL filter
+		check.Args(arg).Asserts()
 	}))
-	s.Run("InsertUser", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(database.InsertUserParams{
-			ID:        uuid.New(),
-			LoginType: database.LoginTypePassword,
-			RBACRoles: []string{},
-		}).Asserts(rbac.ResourceAssignRole, policy.ActionAssign, rbac.ResourceUser, policy.ActionCreate)
+	s.Run("InsertUser", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.InsertUserParams{ID: uuid.New(), LoginType: database.LoginTypePassword, RBACRoles: []string{}}
+		dbm.EXPECT().InsertUser(gomock.Any(), arg).Return(database.User{ID: arg.ID, LoginType: arg.LoginType}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceAssignRole, policy.ActionAssign, rbac.ResourceUser, policy.ActionCreate)
 	}))
-	s.Run("InsertUserLink", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.InsertUserLinkParams{
-			UserID:    u.ID,
-			LoginType: database.LoginTypeOIDC,
-		}).Asserts(u, policy.ActionUpdate)
+	s.Run("InsertUserLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.InsertUserLinkParams{UserID: u.ID, LoginType: database.LoginTypeOIDC}
+		dbm.EXPECT().InsertUserLink(gomock.Any(), arg).Return(database.UserLink{}, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdate)
 	}))
-	s.Run("UpdateUserDeletedByID", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
+	s.Run("UpdateUserDeletedByID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserDeletedByID(gomock.Any(), u.ID).Return(nil).AnyTimes()
 		check.Args(u.ID).Asserts(u, policy.ActionDelete).Returns()
 	}))
-	s.Run("UpdateUserGithubComUserID", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserGithubComUserIDParams{
-			ID: u.ID,
-		}).Asserts(u, policy.ActionUpdatePersonal)
+	s.Run("UpdateUserGithubComUserID", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserGithubComUserIDParams{ID: u.ID}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserGithubComUserID(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal)
 	}))
-	s.Run("UpdateUserHashedPassword", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserHashedPasswordParams{
-			ID: u.ID,
-		}).Asserts(u, policy.ActionUpdatePersonal).Returns()
+	s.Run("UpdateUserHashedPassword", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserHashedPasswordParams{ID: u.ID}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserHashedPassword(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal).Returns()
 	}))
-	s.Run("UpdateUserHashedOneTimePasscode", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserHashedOneTimePasscodeParams{
-			ID:                       u.ID,
-			HashedOneTimePasscode:    []byte{},
-			OneTimePasscodeExpiresAt: sql.NullTime{Time: u.CreatedAt, Valid: true},
-		}).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
+	s.Run("UpdateUserHashedOneTimePasscode", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserHashedOneTimePasscodeParams{ID: u.ID}
+		dbm.EXPECT().UpdateUserHashedOneTimePasscode(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceSystem, policy.ActionUpdate).Returns()
 	}))
-	s.Run("UpdateUserQuietHoursSchedule", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserQuietHoursScheduleParams{
-			ID: u.ID,
-		}).Asserts(u, policy.ActionUpdatePersonal)
+	s.Run("UpdateUserQuietHoursSchedule", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserQuietHoursScheduleParams{ID: u.ID}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserQuietHoursSchedule(gomock.Any(), arg).Return(database.User{}, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal)
 	}))
-	s.Run("UpdateUserLastSeenAt", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserLastSeenAtParams{
-			ID:         u.ID,
-			UpdatedAt:  u.UpdatedAt,
-			LastSeenAt: u.LastSeenAt,
-		}).Asserts(u, policy.ActionUpdate).Returns(u)
+	s.Run("UpdateUserLastSeenAt", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserLastSeenAtParams{ID: u.ID, UpdatedAt: u.UpdatedAt, LastSeenAt: u.LastSeenAt}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserLastSeenAt(gomock.Any(), arg).Return(u, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdate).Returns(u)
 	}))
-	s.Run("UpdateUserProfile", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserProfileParams{
-			ID:        u.ID,
-			Email:     u.Email,
-			Username:  u.Username,
-			Name:      u.Name,
-			UpdatedAt: u.UpdatedAt,
-		}).Asserts(u, policy.ActionUpdatePersonal).Returns(u)
+	s.Run("UpdateUserProfile", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserProfileParams{ID: u.ID, Email: u.Email, Username: u.Username, Name: u.Name, UpdatedAt: u.UpdatedAt}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserProfile(gomock.Any(), arg).Return(u, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal).Returns(u)
 	}))
-	s.Run("GetUserWorkspaceBuildParameters", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(
-			database.GetUserWorkspaceBuildParametersParams{
-				OwnerID:    u.ID,
-				TemplateID: uuid.UUID{},
-			},
-		).Asserts(u, policy.ActionReadPersonal).Returns(
-			[]database.GetUserWorkspaceBuildParametersRow{},
-		)
+	s.Run("GetUserWorkspaceBuildParameters", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.GetUserWorkspaceBuildParametersParams{OwnerID: u.ID, TemplateID: uuid.Nil}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().GetUserWorkspaceBuildParameters(gomock.Any(), arg).Return([]database.GetUserWorkspaceBuildParametersRow{}, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionReadPersonal).Returns([]database.GetUserWorkspaceBuildParametersRow{})
 	}))
-	s.Run("GetUserThemePreference", s.Subtest(func(db database.Store, check *expects) {
-		ctx := context.Background()
-		u := dbgen.User(s.T(), db, database.User{})
-		db.UpdateUserThemePreference(ctx, database.UpdateUserThemePreferenceParams{
-			UserID:          u.ID,
-			ThemePreference: "light",
-		})
+	s.Run("GetUserThemePreference", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().GetUserThemePreference(gomock.Any(), u.ID).Return("light", nil).AnyTimes()
 		check.Args(u.ID).Asserts(u, policy.ActionReadPersonal).Returns("light")
 	}))
-	s.Run("UpdateUserThemePreference", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		uc := database.UserConfig{
-			UserID: u.ID,
-			Key:    "theme_preference",
-			Value:  "dark",
-		}
-		check.Args(database.UpdateUserThemePreferenceParams{
-			UserID:          u.ID,
-			ThemePreference: uc.Value,
-		}).Asserts(u, policy.ActionUpdatePersonal).Returns(uc)
+	s.Run("UpdateUserThemePreference", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		uc := database.UserConfig{UserID: u.ID, Key: "theme_preference", Value: "dark"}
+		arg := database.UpdateUserThemePreferenceParams{UserID: u.ID, ThemePreference: uc.Value}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserThemePreference(gomock.Any(), arg).Return(uc, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal).Returns(uc)
 	}))
-	s.Run("GetUserTerminalFont", s.Subtest(func(db database.Store, check *expects) {
-		ctx := context.Background()
-		u := dbgen.User(s.T(), db, database.User{})
-		db.UpdateUserTerminalFont(ctx, database.UpdateUserTerminalFontParams{
-			UserID:       u.ID,
-			TerminalFont: "ibm-plex-mono",
-		})
+	s.Run("GetUserTerminalFont", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().GetUserTerminalFont(gomock.Any(), u.ID).Return("ibm-plex-mono", nil).AnyTimes()
 		check.Args(u.ID).Asserts(u, policy.ActionReadPersonal).Returns("ibm-plex-mono")
 	}))
-	s.Run("UpdateUserTerminalFont", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		uc := database.UserConfig{
-			UserID: u.ID,
-			Key:    "terminal_font",
-			Value:  "ibm-plex-mono",
-		}
-		check.Args(database.UpdateUserTerminalFontParams{
-			UserID:       u.ID,
-			TerminalFont: uc.Value,
-		}).Asserts(u, policy.ActionUpdatePersonal).Returns(uc)
+	s.Run("UpdateUserTerminalFont", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		uc := database.UserConfig{UserID: u.ID, Key: "terminal_font", Value: "ibm-plex-mono"}
+		arg := database.UpdateUserTerminalFontParams{UserID: u.ID, TerminalFont: uc.Value}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserTerminalFont(gomock.Any(), arg).Return(uc, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal).Returns(uc)
 	}))
-	s.Run("UpdateUserStatus", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.UpdateUserStatusParams{
-			ID:        u.ID,
-			Status:    u.Status,
-			UpdatedAt: u.UpdatedAt,
-		}).Asserts(u, policy.ActionUpdate).Returns(u)
+	s.Run("UpdateUserStatus", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.UpdateUserStatusParams{ID: u.ID, Status: u.Status, UpdatedAt: u.UpdatedAt}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserStatus(gomock.Any(), arg).Return(u, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdate).Returns(u)
 	}))
-	s.Run("DeleteGitSSHKey", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		key := dbgen.GitSSHKey(s.T(), db, database.GitSSHKey{})
+	s.Run("DeleteGitSSHKey", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.GitSSHKey{})
+		dbm.EXPECT().GetGitSSHKey(gomock.Any(), key.UserID).Return(key, nil).AnyTimes()
+		dbm.EXPECT().DeleteGitSSHKey(gomock.Any(), key.UserID).Return(nil).AnyTimes()
 		check.Args(key.UserID).Asserts(rbac.ResourceUserObject(key.UserID), policy.ActionUpdatePersonal).Returns()
 	}))
-	s.Run("GetGitSSHKey", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		key := dbgen.GitSSHKey(s.T(), db, database.GitSSHKey{})
+	s.Run("GetGitSSHKey", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.GitSSHKey{})
+		dbm.EXPECT().GetGitSSHKey(gomock.Any(), key.UserID).Return(key, nil).AnyTimes()
 		check.Args(key.UserID).Asserts(rbac.ResourceUserObject(key.UserID), policy.ActionReadPersonal).Returns(key)
 	}))
-	s.Run("InsertGitSSHKey", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.InsertGitSSHKeyParams{
-			UserID: u.ID,
-		}).Asserts(u, policy.ActionUpdatePersonal)
+	s.Run("InsertGitSSHKey", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.InsertGitSSHKeyParams{UserID: u.ID}
+		dbm.EXPECT().InsertGitSSHKey(gomock.Any(), arg).Return(database.GitSSHKey{UserID: u.ID}, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal)
 	}))
-	s.Run("UpdateGitSSHKey", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		key := dbgen.GitSSHKey(s.T(), db, database.GitSSHKey{})
-		check.Args(database.UpdateGitSSHKeyParams{
-			UserID:    key.UserID,
-			UpdatedAt: key.UpdatedAt,
-		}).Asserts(rbac.ResourceUserObject(key.UserID), policy.ActionUpdatePersonal).Returns(key)
+	s.Run("UpdateGitSSHKey", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		key := testutil.Fake(s.T(), faker, database.GitSSHKey{})
+		arg := database.UpdateGitSSHKeyParams{UserID: key.UserID, UpdatedAt: key.UpdatedAt}
+		dbm.EXPECT().GetGitSSHKey(gomock.Any(), key.UserID).Return(key, nil).AnyTimes()
+		dbm.EXPECT().UpdateGitSSHKey(gomock.Any(), arg).Return(key, nil).AnyTimes()
+		check.Args(arg).Asserts(key, policy.ActionUpdatePersonal).Returns(key)
 	}))
-	s.Run("GetExternalAuthLink", s.Subtest(func(db database.Store, check *expects) {
-		link := dbgen.ExternalAuthLink(s.T(), db, database.ExternalAuthLink{})
-		check.Args(database.GetExternalAuthLinkParams{
-			ProviderID: link.ProviderID,
-			UserID:     link.UserID,
-		}).Asserts(rbac.ResourceUserObject(link.UserID), policy.ActionReadPersonal).Returns(link)
+	s.Run("GetExternalAuthLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.ExternalAuthLink{})
+		arg := database.GetExternalAuthLinkParams{ProviderID: link.ProviderID, UserID: link.UserID}
+		dbm.EXPECT().GetExternalAuthLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+		check.Args(arg).Asserts(link, policy.ActionReadPersonal).Returns(link)
 	}))
-	s.Run("InsertExternalAuthLink", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.InsertExternalAuthLinkParams{
-			ProviderID: uuid.NewString(),
-			UserID:     u.ID,
-		}).Asserts(u, policy.ActionUpdatePersonal)
+	s.Run("InsertExternalAuthLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		arg := database.InsertExternalAuthLinkParams{ProviderID: uuid.NewString(), UserID: u.ID}
+		dbm.EXPECT().InsertExternalAuthLink(gomock.Any(), arg).Return(database.ExternalAuthLink{}, nil).AnyTimes()
+		check.Args(arg).Asserts(u, policy.ActionUpdatePersonal)
 	}))
-	s.Run("UpdateExternalAuthLinkRefreshToken", s.Subtest(func(db database.Store, check *expects) {
-		link := dbgen.ExternalAuthLink(s.T(), db, database.ExternalAuthLink{})
-		check.Args(database.UpdateExternalAuthLinkRefreshTokenParams{
-			OAuthRefreshToken:      "",
-			OAuthRefreshTokenKeyID: "",
-			ProviderID:             link.ProviderID,
-			UserID:                 link.UserID,
-			UpdatedAt:              link.UpdatedAt,
-		}).Asserts(rbac.ResourceUserObject(link.UserID), policy.ActionUpdatePersonal)
+	s.Run("UpdateExternalAuthLinkRefreshToken", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.ExternalAuthLink{})
+		arg := database.UpdateExternalAuthLinkRefreshTokenParams{OAuthRefreshToken: "", OAuthRefreshTokenKeyID: "", ProviderID: link.ProviderID, UserID: link.UserID, UpdatedAt: link.UpdatedAt}
+		dbm.EXPECT().GetExternalAuthLink(gomock.Any(), database.GetExternalAuthLinkParams{ProviderID: link.ProviderID, UserID: link.UserID}).Return(link, nil).AnyTimes()
+		dbm.EXPECT().UpdateExternalAuthLinkRefreshToken(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(link, policy.ActionUpdatePersonal)
 	}))
-	s.Run("UpdateExternalAuthLink", s.Subtest(func(db database.Store, check *expects) {
-		link := dbgen.ExternalAuthLink(s.T(), db, database.ExternalAuthLink{})
-		check.Args(database.UpdateExternalAuthLinkParams{
-			ProviderID:        link.ProviderID,
-			UserID:            link.UserID,
-			OAuthAccessToken:  link.OAuthAccessToken,
-			OAuthRefreshToken: link.OAuthRefreshToken,
-			OAuthExpiry:       link.OAuthExpiry,
-			UpdatedAt:         link.UpdatedAt,
-		}).Asserts(rbac.ResourceUserObject(link.UserID), policy.ActionUpdatePersonal).Returns(link)
+	s.Run("UpdateExternalAuthLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.ExternalAuthLink{})
+		arg := database.UpdateExternalAuthLinkParams{ProviderID: link.ProviderID, UserID: link.UserID, OAuthAccessToken: link.OAuthAccessToken, OAuthRefreshToken: link.OAuthRefreshToken, OAuthExpiry: link.OAuthExpiry, UpdatedAt: link.UpdatedAt}
+		dbm.EXPECT().GetExternalAuthLink(gomock.Any(), database.GetExternalAuthLinkParams{ProviderID: link.ProviderID, UserID: link.UserID}).Return(link, nil).AnyTimes()
+		dbm.EXPECT().UpdateExternalAuthLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+		check.Args(arg).Asserts(link, policy.ActionUpdatePersonal).Returns(link)
 	}))
-	s.Run("UpdateUserLink", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		link := dbgen.UserLink(s.T(), db, database.UserLink{})
-		check.Args(database.UpdateUserLinkParams{
-			OAuthAccessToken:  link.OAuthAccessToken,
-			OAuthRefreshToken: link.OAuthRefreshToken,
-			OAuthExpiry:       link.OAuthExpiry,
-			UserID:            link.UserID,
-			LoginType:         link.LoginType,
-			Claims:            database.UserLinkClaims{},
-		}).Asserts(rbac.ResourceUserObject(link.UserID), policy.ActionUpdatePersonal).Returns(link)
+	s.Run("UpdateUserLink", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		link := testutil.Fake(s.T(), faker, database.UserLink{})
+		arg := database.UpdateUserLinkParams{OAuthAccessToken: link.OAuthAccessToken, OAuthRefreshToken: link.OAuthRefreshToken, OAuthExpiry: link.OAuthExpiry, UserID: link.UserID, LoginType: link.LoginType, Claims: database.UserLinkClaims{}}
+		dbm.EXPECT().GetUserLinkByUserIDLoginType(gomock.Any(), database.GetUserLinkByUserIDLoginTypeParams{UserID: link.UserID, LoginType: link.LoginType}).Return(link, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserLink(gomock.Any(), arg).Return(link, nil).AnyTimes()
+		check.Args(arg).Asserts(link, policy.ActionUpdatePersonal).Returns(link)
 	}))
-	s.Run("UpdateUserRoles", s.Subtest(func(db database.Store, check *expects) {
-		u := dbgen.User(s.T(), db, database.User{RBACRoles: []string{codersdk.RoleTemplateAdmin}})
+	s.Run("UpdateUserRoles", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{RBACRoles: []string{codersdk.RoleTemplateAdmin}})
 		o := u
 		o.RBACRoles = []string{codersdk.RoleUserAdmin}
-		check.Args(database.UpdateUserRolesParams{
-			GrantedRoles: []string{codersdk.RoleUserAdmin},
-			ID:           u.ID,
-		}).Asserts(
+		arg := database.UpdateUserRolesParams{GrantedRoles: []string{codersdk.RoleUserAdmin}, ID: u.ID}
+		dbm.EXPECT().GetUserByID(gomock.Any(), u.ID).Return(u, nil).AnyTimes()
+		dbm.EXPECT().UpdateUserRoles(gomock.Any(), arg).Return(o, nil).AnyTimes()
+		check.Args(arg).Asserts(
 			u, policy.ActionRead,
 			rbac.ResourceAssignRole, policy.ActionAssign,
 			rbac.ResourceAssignRole, policy.ActionUnassign,
 		).Returns(o)
 	}))
-	s.Run("AllUserIDs", s.Subtest(func(db database.Store, check *expects) {
-		a := dbgen.User(s.T(), db, database.User{})
-		b := dbgen.User(s.T(), db, database.User{})
+	s.Run("AllUserIDs", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		a := testutil.Fake(s.T(), faker, database.User{})
+		b := testutil.Fake(s.T(), faker, database.User{})
+		dbm.EXPECT().AllUserIDs(gomock.Any(), false).Return([]uuid.UUID{a.ID, b.ID}, nil).AnyTimes()
 		check.Args(false).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(slice.New(a.ID, b.ID))
 	}))
-	s.Run("CustomRoles", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(database.CustomRolesParams{}).Asserts(rbac.ResourceAssignRole, policy.ActionRead).Returns([]database.CustomRole{})
+	s.Run("CustomRoles", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.CustomRolesParams{}
+		dbm.EXPECT().CustomRoles(gomock.Any(), arg).Return([]database.CustomRole{}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceAssignRole, policy.ActionRead).Returns([]database.CustomRole{})
 	}))
-	s.Run("Organization/DeleteCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		customRole := dbgen.CustomRole(s.T(), db, database.CustomRole{
-			OrganizationID: uuid.NullUUID{
-				UUID:  uuid.New(),
-				Valid: true,
-			},
-		})
-		check.Args(database.DeleteCustomRoleParams{
-			Name:           customRole.Name,
-			OrganizationID: customRole.OrganizationID,
-		}).Asserts(
-			rbac.ResourceAssignOrgRole.InOrg(customRole.OrganizationID.UUID), policy.ActionDelete)
+	s.Run("Organization/DeleteCustomRole", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		orgID := uuid.New()
+		arg := database.DeleteCustomRoleParams{Name: "role", OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
+		dbm.EXPECT().DeleteCustomRole(gomock.Any(), arg).Return(nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionDelete)
 	}))
-	s.Run("Site/DeleteCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		customRole := dbgen.CustomRole(s.T(), db, database.CustomRole{
-			OrganizationID: uuid.NullUUID{
-				UUID:  uuid.Nil,
-				Valid: false,
-			},
-		})
-		check.Args(database.DeleteCustomRoleParams{
-			Name: customRole.Name,
-		}).Asserts(
-		// fails immediately, missing organization id
-		).Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
+	s.Run("Site/DeleteCustomRole", s.Mocked(func(_ *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.DeleteCustomRoleParams{Name: "role"}
+		check.Args(arg).Asserts().Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
 	}))
-	s.Run("Blank/UpdateCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		customRole := dbgen.CustomRole(s.T(), db, database.CustomRole{
-			OrganizationID: uuid.NullUUID{UUID: uuid.New(), Valid: true},
-		})
-		// Blank is no perms in the role
-		check.Args(database.UpdateCustomRoleParams{
-			Name:            customRole.Name,
-			DisplayName:     "Test Name",
-			OrganizationID:  customRole.OrganizationID,
-			SitePermissions: nil,
-			OrgPermissions:  nil,
-			UserPermissions: nil,
-		}).Asserts(rbac.ResourceAssignOrgRole.InOrg(customRole.OrganizationID.UUID), policy.ActionUpdate)
+	s.Run("Blank/UpdateCustomRole", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		orgID := uuid.New()
+		arg := database.UpdateCustomRoleParams{Name: "name", DisplayName: "Test Name", OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
+		dbm.EXPECT().UpdateCustomRole(gomock.Any(), arg).Return(database.CustomRole{}, nil).AnyTimes()
+		// Blank perms -> no escalation asserts beyond org role update
+		check.Args(arg).Asserts(rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionUpdate)
 	}))
-	s.Run("SitePermissions/UpdateCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(database.UpdateCustomRoleParams{
+	s.Run("SitePermissions/UpdateCustomRole", s.Mocked(func(_ *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.UpdateCustomRoleParams{
 			Name:           "",
 			OrganizationID: uuid.NullUUID{UUID: uuid.Nil, Valid: false},
 			DisplayName:    "Test Name",
@@ -1825,50 +1950,35 @@ func (s *MethodTestSuite) TestUser() {
 			UserPermissions: db2sdk.List(codersdk.CreatePermissions(map[codersdk.RBACResource][]codersdk.RBACAction{
 				codersdk.ResourceWorkspace: {codersdk.ActionRead},
 			}), convertSDKPerm),
-		}).Asserts(
-		// fails immediately, missing organization id
-		).Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
+		}
+		check.Args(arg).Asserts().Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
 	}))
-	s.Run("OrgPermissions/UpdateCustomRole", s.Subtest(func(db database.Store, check *expects) {
+	s.Run("OrgPermissions/UpdateCustomRole", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 		orgID := uuid.New()
-		customRole := dbgen.CustomRole(s.T(), db, database.CustomRole{
-			OrganizationID: uuid.NullUUID{
-				UUID:  orgID,
-				Valid: true,
-			},
-		})
-
-		check.Args(database.UpdateCustomRoleParams{
-			Name:            customRole.Name,
-			DisplayName:     "Test Name",
-			OrganizationID:  customRole.OrganizationID,
-			SitePermissions: nil,
+		arg := database.UpdateCustomRoleParams{
+			Name:           "name",
+			DisplayName:    "Test Name",
+			OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 			OrgPermissions: db2sdk.List(codersdk.CreatePermissions(map[codersdk.RBACResource][]codersdk.RBACAction{
 				codersdk.ResourceTemplate: {codersdk.ActionCreate, codersdk.ActionRead},
 			}), convertSDKPerm),
-			UserPermissions: nil,
-		}).Asserts(
-			// First check
+		}
+		dbm.EXPECT().UpdateCustomRole(gomock.Any(), arg).Return(database.CustomRole{}, nil).AnyTimes()
+		check.Args(arg).Asserts(
 			rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionUpdate,
 			// Escalation checks
 			rbac.ResourceTemplate.InOrg(orgID), policy.ActionCreate,
 			rbac.ResourceTemplate.InOrg(orgID), policy.ActionRead,
 		)
 	}))
-	s.Run("Blank/InsertCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		// Blank is no perms in the role
+	s.Run("Blank/InsertCustomRole", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 		orgID := uuid.New()
-		check.Args(database.InsertCustomRoleParams{
-			Name:            "test",
-			DisplayName:     "Test Name",
-			OrganizationID:  uuid.NullUUID{UUID: orgID, Valid: true},
-			SitePermissions: nil,
-			OrgPermissions:  nil,
-			UserPermissions: nil,
-		}).Asserts(rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionCreate)
+		arg := database.InsertCustomRoleParams{Name: "test", DisplayName: "Test Name", OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true}}
+		dbm.EXPECT().InsertCustomRole(gomock.Any(), arg).Return(database.CustomRole{}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionCreate)
 	}))
-	s.Run("SitePermissions/InsertCustomRole", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(database.InsertCustomRoleParams{
+	s.Run("SitePermissions/InsertCustomRole", s.Mocked(func(_ *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.InsertCustomRoleParams{
 			Name:        "test",
 			DisplayName: "Test Name",
 			SitePermissions: db2sdk.List(codersdk.CreatePermissions(map[codersdk.RBACResource][]codersdk.RBACAction{
@@ -1878,38 +1988,37 @@ func (s *MethodTestSuite) TestUser() {
 			UserPermissions: db2sdk.List(codersdk.CreatePermissions(map[codersdk.RBACResource][]codersdk.RBACAction{
 				codersdk.ResourceWorkspace: {codersdk.ActionRead},
 			}), convertSDKPerm),
-		}).Asserts(
-		// fails immediately, missing organization id
-		).Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
+		}
+		check.Args(arg).Asserts().Errors(dbauthz.NotAuthorizedError{Err: xerrors.New("custom roles must belong to an organization")})
 	}))
-	s.Run("OrgPermissions/InsertCustomRole", s.Subtest(func(db database.Store, check *expects) {
+	s.Run("OrgPermissions/InsertCustomRole", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
 		orgID := uuid.New()
-		check.Args(database.InsertCustomRoleParams{
-			Name:        "test",
-			DisplayName: "Test Name",
-			OrganizationID: uuid.NullUUID{
-				UUID:  orgID,
-				Valid: true,
-			},
-			SitePermissions: nil,
+		arg := database.InsertCustomRoleParams{
+			Name:           "test",
+			DisplayName:    "Test Name",
+			OrganizationID: uuid.NullUUID{UUID: orgID, Valid: true},
 			OrgPermissions: db2sdk.List(codersdk.CreatePermissions(map[codersdk.RBACResource][]codersdk.RBACAction{
 				codersdk.ResourceTemplate: {codersdk.ActionCreate, codersdk.ActionRead},
 			}), convertSDKPerm),
-			UserPermissions: nil,
-		}).Asserts(
-			// First check
+		}
+		dbm.EXPECT().InsertCustomRole(gomock.Any(), arg).Return(database.CustomRole{}, nil).AnyTimes()
+		check.Args(arg).Asserts(
 			rbac.ResourceAssignOrgRole.InOrg(orgID), policy.ActionCreate,
 			// Escalation checks
 			rbac.ResourceTemplate.InOrg(orgID), policy.ActionCreate,
 			rbac.ResourceTemplate.InOrg(orgID), policy.ActionRead,
 		)
 	}))
-	s.Run("GetUserStatusCounts", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(database.GetUserStatusCountsParams{
-			StartTime: time.Now().Add(-time.Hour * 24 * 30),
-			EndTime:   time.Now(),
-			Interval:  int32((time.Hour * 24).Seconds()),
-		}).Asserts(rbac.ResourceUser, policy.ActionRead)
+	s.Run("GetUserStatusCounts", s.Mocked(func(dbm *dbmock.MockStore, _ *gofakeit.Faker, check *expects) {
+		arg := database.GetUserStatusCountsParams{StartTime: time.Now().Add(-time.Hour * 24 * 30), EndTime: time.Now(), Interval: int32((time.Hour * 24).Seconds())}
+		dbm.EXPECT().GetUserStatusCounts(gomock.Any(), arg).Return([]database.GetUserStatusCountsRow{}, nil).AnyTimes()
+		check.Args(arg).Asserts(rbac.ResourceUser, policy.ActionRead)
+	}))
+	s.Run("ValidateUserIDs", s.Mocked(func(dbm *dbmock.MockStore, faker *gofakeit.Faker, check *expects) {
+		u := testutil.Fake(s.T(), faker, database.User{})
+		ids := []uuid.UUID{u.ID}
+		dbm.EXPECT().ValidateUserIDs(gomock.Any(), ids).Return(database.ValidateUserIDsRow{}, nil).AnyTimes()
+		check.Args(ids).Asserts(rbac.ResourceSystem, policy.ActionRead)
 	}))
 }
 
@@ -1971,6 +2080,30 @@ func (s *MethodTestSuite) TestWorkspace() {
 		_ = dbgen.WorkspaceAgent(s.T(), db, database.WorkspaceAgent{ResourceID: res.ID})
 		// No asserts here because SQLFilter.
 		check.Args(ws.OwnerID, emptyPreparedAuthorized{}).Asserts()
+	}))
+	s.Run("GetWorkspaceBuildParametersByBuildIDs", s.Subtest(func(db database.Store, check *expects) {
+		// no asserts here because SQLFilter
+		check.Args([]uuid.UUID{}).Asserts()
+	}))
+	s.Run("GetAuthorizedWorkspaceBuildParametersByBuildIDs", s.Subtest(func(db database.Store, check *expects) {
+		// no asserts here because SQLFilter
+		check.Args([]uuid.UUID{}, emptyPreparedAuthorized{}).Asserts()
+	}))
+	s.Run("UpdateWorkspaceACLByID", s.Subtest(func(db database.Store, check *expects) {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		ws := dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			OwnerID:        u.ID,
+			OrganizationID: o.ID,
+			TemplateID:     tpl.ID,
+		})
+		check.Args(database.UpdateWorkspaceACLByIDParams{
+			ID: ws.ID,
+		}).Asserts(ws, policy.ActionCreate)
 	}))
 	s.Run("GetLatestWorkspaceBuildByWorkspaceID", s.Subtest(func(db database.Store, check *expects) {
 		u := dbgen.User(s.T(), db, database.User{})
@@ -3028,6 +3161,40 @@ func (s *MethodTestSuite) TestWorkspace() {
 			Deadline:  b.Deadline,
 		}).Asserts(w, policy.ActionUpdate)
 	}))
+	s.Run("UpdateWorkspaceBuildAITaskByID", s.Subtest(func(db database.Store, check *expects) {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		tv := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID:     uuid.NullUUID{UUID: tpl.ID, Valid: true},
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		w := dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			TemplateID:     tpl.ID,
+			OrganizationID: o.ID,
+			OwnerID:        u.ID,
+		})
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			Type: database.ProvisionerJobTypeWorkspaceBuild,
+		})
+		b := dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{
+			JobID:             j.ID,
+			WorkspaceID:       w.ID,
+			TemplateVersionID: tv.ID,
+		})
+		res := dbgen.WorkspaceResource(s.T(), db, database.WorkspaceResource{JobID: b.JobID})
+		agt := dbgen.WorkspaceAgent(s.T(), db, database.WorkspaceAgent{ResourceID: res.ID})
+		app := dbgen.WorkspaceApp(s.T(), db, database.WorkspaceApp{AgentID: agt.ID})
+		check.Args(database.UpdateWorkspaceBuildAITaskByIDParams{
+			HasAITask:    sql.NullBool{Bool: true, Valid: true},
+			SidebarAppID: uuid.NullUUID{UUID: app.ID, Valid: true},
+			ID:           b.ID,
+		}).Asserts(w, policy.ActionUpdate)
+	}))
 	s.Run("SoftDeleteWorkspaceByID", s.Subtest(func(db database.Store, check *expects) {
 		u := dbgen.User(s.T(), db, database.User{})
 		o := dbgen.Organization(s.T(), db, database.Organization{})
@@ -3569,148 +3736,119 @@ func (s *MethodTestSuite) TestExtraMethods() {
 func (s *MethodTestSuite) TestTailnetFunctions() {
 	s.Run("CleanTailnetCoordinators", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("CleanTailnetLostPeers", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("CleanTailnetTunnels", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("DeleteAllTailnetClientSubscriptions", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteAllTailnetClientSubscriptionsParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("DeleteAllTailnetTunnels", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteAllTailnetTunnelsParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("DeleteCoordinator", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("DeleteTailnetAgent", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteTailnetAgentParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).Errors(sql.ErrNoRows).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).Errors(sql.ErrNoRows)
 	}))
 	s.Run("DeleteTailnetClient", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteTailnetClientParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).Errors(sql.ErrNoRows).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).Errors(sql.ErrNoRows)
 	}))
 	s.Run("DeleteTailnetClientSubscription", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteTailnetClientSubscriptionParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete)
 	}))
 	s.Run("DeleteTailnetPeer", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteTailnetPeerParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented).
-			ErrorsWithPG(sql.ErrNoRows)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).Errors(sql.ErrNoRows)
 	}))
 	s.Run("DeleteTailnetTunnel", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(database.DeleteTailnetTunnelParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented).
-			ErrorsWithPG(sql.ErrNoRows)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionDelete).Errors(sql.ErrNoRows)
 	}))
 	s.Run("GetAllTailnetAgents", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetTailnetAgents", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetTailnetClientsForAgent", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetTailnetPeers", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetTailnetTunnelPeerBindings", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetTailnetTunnelPeerIDs", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetAllTailnetCoordinators", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetAllTailnetPeers", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("GetAllTailnetTunnels", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionRead)
 	}))
 	s.Run("UpsertTailnetAgent", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpsertTailnetAgentParams{Node: json.RawMessage("{}")}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate)
 	}))
 	s.Run("UpsertTailnetClient", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpsertTailnetClientParams{Node: json.RawMessage("{}")}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate)
 	}))
 	s.Run("UpsertTailnetClientSubscription", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpsertTailnetClientSubscriptionParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate)
 	}))
 	s.Run("UpsertTailnetCoordinator", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(uuid.New()).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate)
 	}))
 	s.Run("UpsertTailnetPeer", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpsertTailnetPeerParams{
 			Status: database.TailnetStatusOk,
 		}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionCreate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionCreate)
 	}))
 	s.Run("UpsertTailnetTunnel", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpsertTailnetTunnelParams{}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionCreate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionCreate)
 	}))
 	s.Run("UpdateTailnetPeerStatusByCoordinator", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		check.Args(database.UpdateTailnetPeerStatusByCoordinatorParams{Status: database.TailnetStatusOk}).
-			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTailnetCoordinator, policy.ActionUpdate)
 	}))
 }
 
@@ -3828,12 +3966,6 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 			UserID:    l.UserID,
 			LoginType: l.LoginType,
 		}).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(l)
-	}))
-	s.Run("GetLatestWorkspaceBuilds", s.Subtest(func(db database.Store, check *expects) {
-		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
-		dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{})
-		dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{})
-		check.Args().Asserts(rbac.ResourceSystem, policy.ActionRead)
 	}))
 	s.Run("GetActiveUserCount", s.Subtest(func(db database.Store, check *expects) {
 		check.Args(false).Asserts(rbac.ResourceSystem, policy.ActionRead).Returns(int64(0))
@@ -4092,7 +4224,7 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 			APIKeyScope: database.AgentKeyScopeEnumAll,
 		}).Asserts(ws, policy.ActionCreateAgent)
 	}))
-	s.Run("InsertWorkspaceApp", s.Subtest(func(db database.Store, check *expects) {
+	s.Run("UpsertWorkspaceApp", s.Subtest(func(db database.Store, check *expects) {
 		_ = dbgen.User(s.T(), db, database.User{})
 		u := dbgen.User(s.T(), db, database.User{})
 		o := dbgen.Organization(s.T(), db, database.Organization{})
@@ -4108,7 +4240,7 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 		_ = dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{WorkspaceID: ws.ID, JobID: j.ID, TemplateVersionID: tv.ID})
 		res := dbgen.WorkspaceResource(s.T(), db, database.WorkspaceResource{JobID: j.ID})
 		agent := dbgen.WorkspaceAgent(s.T(), db, database.WorkspaceAgent{ResourceID: res.ID})
-		check.Args(database.InsertWorkspaceAppParams{
+		check.Args(database.UpsertWorkspaceAppParams{
 			ID:           uuid.New(),
 			AgentID:      agent.ID,
 			Health:       database.WorkspaceAppHealthDisabled,
@@ -4160,6 +4292,20 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 		check.Args(database.UpdateProvisionerJobByIDParams{
 			ID:        j.ID,
 			UpdatedAt: time.Now(),
+		}).Asserts(rbac.ResourceProvisionerJobs, policy.ActionUpdate)
+	}))
+	s.Run("UpdateProvisionerJobLogsLength", s.Subtest(func(db database.Store, check *expects) {
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{})
+		check.Args(database.UpdateProvisionerJobLogsLengthParams{
+			ID:         j.ID,
+			LogsLength: 100,
+		}).Asserts(rbac.ResourceProvisionerJobs, policy.ActionUpdate)
+	}))
+	s.Run("UpdateProvisionerJobLogsOverflowed", s.Subtest(func(db database.Store, check *expects) {
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{})
+		check.Args(database.UpdateProvisionerJobLogsOverflowedParams{
+			ID:             j.ID,
+			LogsOverflowed: true,
 		}).Asserts(rbac.ResourceProvisionerJobs, policy.ActionUpdate)
 	}))
 	s.Run("InsertProvisionerJob", s.Subtest(func(db database.Store, check *expects) {
@@ -4563,8 +4709,59 @@ func (s *MethodTestSuite) TestSystemFunctions() {
 			VapidPrivateKey: "test",
 		}).Asserts(rbac.ResourceDeploymentConfig, policy.ActionUpdate)
 	}))
-	s.Run("GetProvisionerJobByIDForUpdate", s.Subtest(func(db database.Store, check *expects) {
-		check.Args(uuid.New()).Asserts(rbac.ResourceProvisionerJobs, policy.ActionRead).Errors(sql.ErrNoRows)
+	s.Run("Build/GetProvisionerJobByIDForUpdate", s.Subtest(func(db database.Store, check *expects) {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		w := dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			OwnerID:        u.ID,
+			OrganizationID: o.ID,
+			TemplateID:     tpl.ID,
+		})
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			Type: database.ProvisionerJobTypeWorkspaceBuild,
+		})
+		tv := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID:     uuid.NullUUID{UUID: tpl.ID, Valid: true},
+			JobID:          j.ID,
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		_ = dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{
+			JobID:             j.ID,
+			WorkspaceID:       w.ID,
+			TemplateVersionID: tv.ID,
+		})
+		check.Args(j.ID).Asserts(w, policy.ActionRead).Returns(j)
+	}))
+	s.Run("TemplateVersion/GetProvisionerJobByIDForUpdate", s.Subtest(func(db database.Store, check *expects) {
+		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			Type: database.ProvisionerJobTypeTemplateVersionImport,
+		})
+		tpl := dbgen.Template(s.T(), db, database.Template{})
+		v := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID: uuid.NullUUID{UUID: tpl.ID, Valid: true},
+			JobID:      j.ID,
+		})
+		check.Args(j.ID).Asserts(v.RBACObject(tpl), policy.ActionRead).Returns(j)
+	}))
+	s.Run("TemplateVersionDryRun/GetProvisionerJobByIDForUpdate", s.Subtest(func(db database.Store, check *expects) {
+		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
+		tpl := dbgen.Template(s.T(), db, database.Template{})
+		v := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID: uuid.NullUUID{UUID: tpl.ID, Valid: true},
+		})
+		j := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			Type: database.ProvisionerJobTypeTemplateVersionDryRun,
+			Input: must(json.Marshal(struct {
+				TemplateVersionID uuid.UUID `json:"template_version_id"`
+			}{TemplateVersionID: v.ID})),
+		})
+		check.Args(j.ID).Asserts(v.RBACObject(tpl), policy.ActionRead).Returns(j)
 	}))
 }
 
@@ -4641,21 +4838,18 @@ func (s *MethodTestSuite) TestNotifications() {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
 		user := dbgen.User(s.T(), db, database.User{})
 		check.Args(user.ID).Asserts(rbac.ResourceNotificationTemplate, policy.ActionRead).
-			ErrorsWithPG(sql.ErrNoRows).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			ErrorsWithPG(sql.ErrNoRows)
 	}))
 	s.Run("GetNotificationTemplatesByKind", s.Subtest(func(db database.Store, check *expects) {
 		check.Args(database.NotificationTemplateKindSystem).
-			Asserts().
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts()
 		// TODO(dannyk): add support for other database.NotificationTemplateKind types once implemented.
 	}))
 	s.Run("UpdateNotificationTemplateMethodByID", s.Subtest(func(db database.Store, check *expects) {
 		check.Args(database.UpdateNotificationTemplateMethodByIDParams{
 			Method: database.NullNotificationMethod{NotificationMethod: database.NotificationMethodWebhook, Valid: true},
 			ID:     notifications.TemplateWorkspaceDormant,
-		}).Asserts(rbac.ResourceNotificationTemplate, policy.ActionUpdate).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+		}).Asserts(rbac.ResourceNotificationTemplate, policy.ActionUpdate)
 	}))
 
 	// Notification preferences
@@ -4913,6 +5107,11 @@ func (s *MethodTestSuite) TestPrebuilds() {
 			Asserts(template.RBACObject(), policy.ActionRead).
 			Returns(insertedParameters)
 	}))
+	s.Run("GetActivePresetPrebuildSchedules", s.Subtest(func(db database.Store, check *expects) {
+		check.Args().
+			Asserts(rbac.ResourceTemplate.All(), policy.ActionRead).
+			Returns([]database.TemplateVersionPresetPrebuildSchedule{})
+	}))
 	s.Run("GetPresetsByTemplateVersionID", s.Subtest(func(db database.Store, check *expects) {
 		ctx := context.Background()
 		org := dbgen.Organization(s.T(), db, database.Organization{})
@@ -4964,39 +5163,38 @@ func (s *MethodTestSuite) TestPrebuilds() {
 			rbac.ResourceWorkspace.WithOwner(user.ID.String()).InOrg(org.ID), policy.ActionCreate,
 			template, policy.ActionRead,
 			template, policy.ActionUse,
-		).ErrorsWithInMemDB(dbmem.ErrUnimplemented).
-			ErrorsWithPG(sql.ErrNoRows)
+		).Errors(sql.ErrNoRows)
 	}))
 	s.Run("GetPrebuildMetrics", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead)
+	}))
+	s.Run("GetPrebuildsSettings", s.Subtest(func(db database.Store, check *expects) {
+		check.Args().Asserts()
+	}))
+	s.Run("UpsertPrebuildsSettings", s.Subtest(func(db database.Store, check *expects) {
+		check.Args("foo").Asserts(rbac.ResourceDeploymentConfig, policy.ActionUpdate)
 	}))
 	s.Run("CountInProgressPrebuilds", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead)
 	}))
 	s.Run("GetPresetsAtFailureLimit", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(int64(0)).
-			Asserts(rbac.ResourceTemplate.All(), policy.ActionViewInsights).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTemplate.All(), policy.ActionViewInsights)
 	}))
 	s.Run("GetPresetsBackoff", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args(time.Time{}).
-			Asserts(rbac.ResourceTemplate.All(), policy.ActionViewInsights).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTemplate.All(), policy.ActionViewInsights)
 	}))
 	s.Run("GetRunningPrebuiltWorkspaces", s.Subtest(func(_ database.Store, check *expects) {
 		check.Args().
-			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceWorkspace.All(), policy.ActionRead)
 	}))
 	s.Run("GetTemplatePresetsWithPrebuilds", s.Subtest(func(db database.Store, check *expects) {
 		user := dbgen.User(s.T(), db, database.User{})
 		check.Args(uuid.NullUUID{UUID: user.ID, Valid: true}).
-			Asserts(rbac.ResourceTemplate.All(), policy.ActionRead).
-			ErrorsWithInMemDB(dbmem.ErrUnimplemented)
+			Asserts(rbac.ResourceTemplate.All(), policy.ActionRead)
 	}))
 	s.Run("GetPresetByID", s.Subtest(func(db database.Store, check *expects) {
 		org := dbgen.Organization(s.T(), db, database.Organization{})
@@ -5077,17 +5275,15 @@ func (s *MethodTestSuite) TestOAuth2ProviderApps() {
 		key, _ := dbgen.APIKey(s.T(), db, database.APIKey{
 			UserID: user.ID,
 		})
-		createdAt := dbtestutil.NowInDefaultTimezone()
-		if !dbtestutil.WillUsePostgres() {
-			createdAt = time.Time{}
-		}
+		// Use a fixed timestamp for consistent test results across all database types
+		fixedTime := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
 		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{
-			CreatedAt: createdAt,
-			UpdatedAt: createdAt,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
 		})
 		_ = dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{
-			CreatedAt: createdAt,
-			UpdatedAt: createdAt,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
 		})
 		secret := dbgen.OAuth2ProviderAppSecret(s.T(), db, database.OAuth2ProviderAppSecret{
 			AppID: app.ID,
@@ -5096,20 +5292,17 @@ func (s *MethodTestSuite) TestOAuth2ProviderApps() {
 			_ = dbgen.OAuth2ProviderAppToken(s.T(), db, database.OAuth2ProviderAppToken{
 				AppSecretID: secret.ID,
 				APIKeyID:    key.ID,
+				UserID:      user.ID,
 				HashPrefix:  []byte(fmt.Sprintf("%d", i)),
 			})
 		}
+		expectedApp := app
+		expectedApp.CreatedAt = fixedTime
+		expectedApp.UpdatedAt = fixedTime
 		check.Args(user.ID).Asserts(rbac.ResourceOauth2AppCodeToken.WithOwner(user.ID.String()), policy.ActionRead).Returns([]database.GetOAuth2ProviderAppsByUserIDRow{
 			{
-				OAuth2ProviderApp: database.OAuth2ProviderApp{
-					ID:          app.ID,
-					CallbackURL: app.CallbackURL,
-					Icon:        app.Icon,
-					Name:        app.Name,
-					CreatedAt:   createdAt,
-					UpdatedAt:   createdAt,
-				},
-				TokenCount: 5,
+				OAuth2ProviderApp: expectedApp,
+				TokenCount:        5,
 			},
 		})
 	}))
@@ -5122,15 +5315,76 @@ func (s *MethodTestSuite) TestOAuth2ProviderApps() {
 		app.Name = "my-new-name"
 		app.UpdatedAt = dbtestutil.NowInDefaultTimezone()
 		check.Args(database.UpdateOAuth2ProviderAppByIDParams{
-			ID:          app.ID,
-			Name:        app.Name,
-			CallbackURL: app.CallbackURL,
-			UpdatedAt:   app.UpdatedAt,
+			ID:                      app.ID,
+			Name:                    app.Name,
+			Icon:                    app.Icon,
+			CallbackURL:             app.CallbackURL,
+			RedirectUris:            app.RedirectUris,
+			ClientType:              app.ClientType,
+			DynamicallyRegistered:   app.DynamicallyRegistered,
+			ClientSecretExpiresAt:   app.ClientSecretExpiresAt,
+			GrantTypes:              app.GrantTypes,
+			ResponseTypes:           app.ResponseTypes,
+			TokenEndpointAuthMethod: app.TokenEndpointAuthMethod,
+			Scope:                   app.Scope,
+			Contacts:                app.Contacts,
+			ClientUri:               app.ClientUri,
+			LogoUri:                 app.LogoUri,
+			TosUri:                  app.TosUri,
+			PolicyUri:               app.PolicyUri,
+			JwksUri:                 app.JwksUri,
+			Jwks:                    app.Jwks,
+			SoftwareID:              app.SoftwareID,
+			SoftwareVersion:         app.SoftwareVersion,
+			UpdatedAt:               app.UpdatedAt,
 		}).Asserts(rbac.ResourceOauth2App, policy.ActionUpdate).Returns(app)
 	}))
 	s.Run("DeleteOAuth2ProviderAppByID", s.Subtest(func(db database.Store, check *expects) {
 		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{})
 		check.Args(app.ID).Asserts(rbac.ResourceOauth2App, policy.ActionDelete)
+	}))
+	s.Run("GetOAuth2ProviderAppByClientID", s.Subtest(func(db database.Store, check *expects) {
+		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{})
+		check.Args(app.ID).Asserts(rbac.ResourceOauth2App, policy.ActionRead).Returns(app)
+	}))
+	s.Run("DeleteOAuth2ProviderAppByClientID", s.Subtest(func(db database.Store, check *expects) {
+		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{})
+		check.Args(app.ID).Asserts(rbac.ResourceOauth2App, policy.ActionDelete)
+	}))
+	s.Run("UpdateOAuth2ProviderAppByClientID", s.Subtest(func(db database.Store, check *expects) {
+		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
+		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{})
+		app.Name = "updated-name"
+		app.UpdatedAt = dbtestutil.NowInDefaultTimezone()
+		check.Args(database.UpdateOAuth2ProviderAppByClientIDParams{
+			ID:                      app.ID,
+			Name:                    app.Name,
+			Icon:                    app.Icon,
+			CallbackURL:             app.CallbackURL,
+			RedirectUris:            app.RedirectUris,
+			ClientType:              app.ClientType,
+			ClientSecretExpiresAt:   app.ClientSecretExpiresAt,
+			GrantTypes:              app.GrantTypes,
+			ResponseTypes:           app.ResponseTypes,
+			TokenEndpointAuthMethod: app.TokenEndpointAuthMethod,
+			Scope:                   app.Scope,
+			Contacts:                app.Contacts,
+			ClientUri:               app.ClientUri,
+			LogoUri:                 app.LogoUri,
+			TosUri:                  app.TosUri,
+			PolicyUri:               app.PolicyUri,
+			JwksUri:                 app.JwksUri,
+			Jwks:                    app.Jwks,
+			SoftwareID:              app.SoftwareID,
+			SoftwareVersion:         app.SoftwareVersion,
+			UpdatedAt:               app.UpdatedAt,
+		}).Asserts(rbac.ResourceOauth2App, policy.ActionUpdate).Returns(app)
+	}))
+	s.Run("GetOAuth2ProviderAppByRegistrationToken", s.Subtest(func(db database.Store, check *expects) {
+		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{
+			RegistrationAccessToken: sql.NullString{String: "test-token", Valid: true},
+		})
+		check.Args(sql.NullString{String: "test-token", Valid: true}).Asserts(rbac.ResourceOauth2App, policy.ActionRead).Returns(app)
 	}))
 }
 
@@ -5264,6 +5518,7 @@ func (s *MethodTestSuite) TestOAuth2ProviderAppTokens() {
 		check.Args(database.InsertOAuth2ProviderAppTokenParams{
 			AppSecretID: secret.ID,
 			APIKeyID:    key.ID,
+			UserID:      user.ID,
 		}).Asserts(rbac.ResourceOauth2AppCodeToken.WithOwner(user.ID.String()), policy.ActionCreate)
 	}))
 	s.Run("GetOAuth2ProviderAppTokenByPrefix", s.Subtest(func(db database.Store, check *expects) {
@@ -5278,8 +5533,25 @@ func (s *MethodTestSuite) TestOAuth2ProviderAppTokens() {
 		token := dbgen.OAuth2ProviderAppToken(s.T(), db, database.OAuth2ProviderAppToken{
 			AppSecretID: secret.ID,
 			APIKeyID:    key.ID,
+			UserID:      user.ID,
 		})
-		check.Args(token.HashPrefix).Asserts(rbac.ResourceOauth2AppCodeToken.WithOwner(user.ID.String()), policy.ActionRead)
+		check.Args(token.HashPrefix).Asserts(rbac.ResourceOauth2AppCodeToken.WithOwner(user.ID.String()).WithID(token.ID), policy.ActionRead).Returns(token)
+	}))
+	s.Run("GetOAuth2ProviderAppTokenByAPIKeyID", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		key, _ := dbgen.APIKey(s.T(), db, database.APIKey{
+			UserID: user.ID,
+		})
+		app := dbgen.OAuth2ProviderApp(s.T(), db, database.OAuth2ProviderApp{})
+		secret := dbgen.OAuth2ProviderAppSecret(s.T(), db, database.OAuth2ProviderAppSecret{
+			AppID: app.ID,
+		})
+		token := dbgen.OAuth2ProviderAppToken(s.T(), db, database.OAuth2ProviderAppToken{
+			AppSecretID: secret.ID,
+			APIKeyID:    key.ID,
+			UserID:      user.ID,
+		})
+		check.Args(token.APIKeyID).Asserts(rbac.ResourceOauth2AppCodeToken.WithOwner(user.ID.String()).WithID(token.ID), policy.ActionRead).Returns(token)
 	}))
 	s.Run("DeleteOAuth2ProviderAppTokensByAppAndUserID", s.Subtest(func(db database.Store, check *expects) {
 		dbtestutil.DisableForeignKeysAndTriggers(s.T(), db)
@@ -5295,6 +5567,7 @@ func (s *MethodTestSuite) TestOAuth2ProviderAppTokens() {
 			_ = dbgen.OAuth2ProviderAppToken(s.T(), db, database.OAuth2ProviderAppToken{
 				AppSecretID: secret.ID,
 				APIKeyID:    key.ID,
+				UserID:      user.ID,
 				HashPrefix:  []byte(fmt.Sprintf("%d", i)),
 			})
 		}
@@ -5459,76 +5732,143 @@ func (s *MethodTestSuite) TestResourcesProvisionerdserver() {
 	}))
 }
 
-func (s *MethodTestSuite) TestChat() {
-	createChat := func(t *testing.T, db database.Store) (database.User, database.Chat, database.ChatMessage) {
-		t.Helper()
-
-		usr := dbgen.User(t, db, database.User{})
-		chat := dbgen.Chat(s.T(), db, database.Chat{
-			OwnerID: usr.ID,
+func (s *MethodTestSuite) TestAuthorizePrebuiltWorkspace() {
+	s.Run("PrebuildDelete/InsertWorkspaceBuild", s.Subtest(func(db database.Store, check *expects) {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
 		})
-		msg := dbgen.ChatMessage(s.T(), db, database.ChatMessage{
-			ChatID: chat.ID,
+		w := dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			TemplateID:     tpl.ID,
+			OrganizationID: o.ID,
+			OwnerID:        database.PrebuildsSystemUserID,
 		})
-
-		return usr, chat, msg
-	}
-
-	s.Run("DeleteChat", s.Subtest(func(db database.Store, check *expects) {
-		_, c, _ := createChat(s.T(), db)
-		check.Args(c.ID).Asserts(c, policy.ActionDelete)
-	}))
-
-	s.Run("GetChatByID", s.Subtest(func(db database.Store, check *expects) {
-		_, c, _ := createChat(s.T(), db)
-		check.Args(c.ID).Asserts(c, policy.ActionRead).Returns(c)
-	}))
-
-	s.Run("GetChatMessagesByChatID", s.Subtest(func(db database.Store, check *expects) {
-		_, c, m := createChat(s.T(), db)
-		check.Args(c.ID).Asserts(c, policy.ActionRead).Returns([]database.ChatMessage{m})
-	}))
-
-	s.Run("GetChatsByOwnerID", s.Subtest(func(db database.Store, check *expects) {
-		u1, u1c1, _ := createChat(s.T(), db)
-		u1c2 := dbgen.Chat(s.T(), db, database.Chat{
-			OwnerID:   u1.ID,
-			CreatedAt: u1c1.CreatedAt.Add(time.Hour),
+		pj := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			OrganizationID: o.ID,
 		})
-		_, _, _ = createChat(s.T(), db) // other user's chat
-		check.Args(u1.ID).Asserts(u1c2, policy.ActionRead, u1c1, policy.ActionRead).Returns([]database.Chat{u1c2, u1c1})
-	}))
-
-	s.Run("InsertChat", s.Subtest(func(db database.Store, check *expects) {
-		usr := dbgen.User(s.T(), db, database.User{})
-		check.Args(database.InsertChatParams{
-			OwnerID:   usr.ID,
-			Title:     "test chat",
-			CreatedAt: dbtime.Now(),
-			UpdatedAt: dbtime.Now(),
-		}).Asserts(rbac.ResourceChat.WithOwner(usr.ID.String()), policy.ActionCreate)
-	}))
-
-	s.Run("InsertChatMessages", s.Subtest(func(db database.Store, check *expects) {
-		usr := dbgen.User(s.T(), db, database.User{})
-		chat := dbgen.Chat(s.T(), db, database.Chat{
-			OwnerID: usr.ID,
+		tv := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID:     uuid.NullUUID{UUID: tpl.ID, Valid: true},
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
 		})
-		check.Args(database.InsertChatMessagesParams{
-			ChatID:    chat.ID,
-			CreatedAt: dbtime.Now(),
-			Model:     "test-model",
-			Provider:  "test-provider",
-			Content:   []byte(`[]`),
-		}).Asserts(chat, policy.ActionUpdate)
+		check.Args(database.InsertWorkspaceBuildParams{
+			WorkspaceID:       w.ID,
+			Transition:        database.WorkspaceTransitionDelete,
+			Reason:            database.BuildReasonInitiator,
+			TemplateVersionID: tv.ID,
+			JobID:             pj.ID,
+		}).
+			// Simulate a fallback authorization flow:
+			// - First, the default workspace authorization fails (simulated by returning an error).
+			// - Then, authorization is retried using the prebuilt workspace object, which succeeds.
+			// The test asserts that both authorization attempts occur in the correct order.
+			WithSuccessAuthorizer(func(ctx context.Context, subject rbac.Subject, action policy.Action, obj rbac.Object) error {
+				if obj.Type == rbac.ResourceWorkspace.Type {
+					return xerrors.Errorf("not authorized for workspace type")
+				}
+				return nil
+			}).Asserts(w, policy.ActionDelete, w.AsPrebuild(), policy.ActionDelete)
 	}))
+	s.Run("PrebuildUpdate/InsertWorkspaceBuildParameters", s.Subtest(func(db database.Store, check *expects) {
+		u := dbgen.User(s.T(), db, database.User{})
+		o := dbgen.Organization(s.T(), db, database.Organization{})
+		tpl := dbgen.Template(s.T(), db, database.Template{
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		w := dbgen.Workspace(s.T(), db, database.WorkspaceTable{
+			TemplateID:     tpl.ID,
+			OrganizationID: o.ID,
+			OwnerID:        database.PrebuildsSystemUserID,
+		})
+		pj := dbgen.ProvisionerJob(s.T(), db, nil, database.ProvisionerJob{
+			OrganizationID: o.ID,
+		})
+		tv := dbgen.TemplateVersion(s.T(), db, database.TemplateVersion{
+			TemplateID:     uuid.NullUUID{UUID: tpl.ID, Valid: true},
+			OrganizationID: o.ID,
+			CreatedBy:      u.ID,
+		})
+		wb := dbgen.WorkspaceBuild(s.T(), db, database.WorkspaceBuild{
+			JobID:             pj.ID,
+			WorkspaceID:       w.ID,
+			TemplateVersionID: tv.ID,
+		})
+		check.Args(database.InsertWorkspaceBuildParametersParams{
+			WorkspaceBuildID: wb.ID,
+		}).
+			// Simulate a fallback authorization flow:
+			// - First, the default workspace authorization fails (simulated by returning an error).
+			// - Then, authorization is retried using the prebuilt workspace object, which succeeds.
+			// The test asserts that both authorization attempts occur in the correct order.
+			WithSuccessAuthorizer(func(ctx context.Context, subject rbac.Subject, action policy.Action, obj rbac.Object) error {
+				if obj.Type == rbac.ResourceWorkspace.Type {
+					return xerrors.Errorf("not authorized for workspace type")
+				}
+				return nil
+			}).Asserts(w, policy.ActionUpdate, w.AsPrebuild(), policy.ActionUpdate)
+	}))
+}
 
-	s.Run("UpdateChatByID", s.Subtest(func(db database.Store, check *expects) {
-		_, c, _ := createChat(s.T(), db)
-		check.Args(database.UpdateChatByIDParams{
-			ID:        c.ID,
-			Title:     "new title",
-			UpdatedAt: dbtime.Now(),
-		}).Asserts(c, policy.ActionUpdate)
+func (s *MethodTestSuite) TestUserSecrets() {
+	s.Run("GetUserSecretByUserIDAndName", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		userSecret := dbgen.UserSecret(s.T(), db, database.UserSecret{
+			UserID: user.ID,
+		})
+		arg := database.GetUserSecretByUserIDAndNameParams{
+			UserID: user.ID,
+			Name:   userSecret.Name,
+		}
+		check.Args(arg).
+			Asserts(rbac.ResourceUserSecret.WithOwner(arg.UserID.String()), policy.ActionRead).
+			Returns(userSecret)
+	}))
+	s.Run("GetUserSecret", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		userSecret := dbgen.UserSecret(s.T(), db, database.UserSecret{
+			UserID: user.ID,
+		})
+		check.Args(userSecret.ID).
+			Asserts(userSecret, policy.ActionRead).
+			Returns(userSecret)
+	}))
+	s.Run("ListUserSecrets", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		userSecret := dbgen.UserSecret(s.T(), db, database.UserSecret{
+			UserID: user.ID,
+		})
+		check.Args(user.ID).
+			Asserts(rbac.ResourceUserSecret.WithOwner(user.ID.String()), policy.ActionRead).
+			Returns([]database.UserSecret{userSecret})
+	}))
+	s.Run("CreateUserSecret", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		arg := database.CreateUserSecretParams{
+			UserID: user.ID,
+		}
+		check.Args(arg).
+			Asserts(rbac.ResourceUserSecret.WithOwner(arg.UserID.String()), policy.ActionCreate)
+	}))
+	s.Run("UpdateUserSecret", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		userSecret := dbgen.UserSecret(s.T(), db, database.UserSecret{
+			UserID: user.ID,
+		})
+		arg := database.UpdateUserSecretParams{
+			ID: userSecret.ID,
+		}
+		check.Args(arg).
+			Asserts(userSecret, policy.ActionUpdate)
+	}))
+	s.Run("DeleteUserSecret", s.Subtest(func(db database.Store, check *expects) {
+		user := dbgen.User(s.T(), db, database.User{})
+		userSecret := dbgen.UserSecret(s.T(), db, database.UserSecret{
+			UserID: user.ID,
+		})
+		check.Args(userSecret.ID).
+			Asserts(userSecret, policy.ActionRead, userSecret, policy.ActionDelete)
 	}))
 }

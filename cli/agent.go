@@ -40,23 +40,24 @@ import (
 
 func (r *RootCmd) workspaceAgent() *serpent.Command {
 	var (
-		auth                string
-		logDir              string
-		scriptDataDir       string
-		pprofAddress        string
-		noReap              bool
-		sshMaxTimeout       time.Duration
-		tailnetListenPort   int64
-		prometheusAddress   string
-		debugAddress        string
-		slogHumanPath       string
-		slogJSONPath        string
-		slogStackdriverPath string
-		blockFileTransfer   bool
-		agentHeaderCommand  string
-		agentHeader         []string
-
-		experimentalDevcontainersEnabled bool
+		auth                           string
+		logDir                         string
+		scriptDataDir                  string
+		pprofAddress                   string
+		noReap                         bool
+		sshMaxTimeout                  time.Duration
+		tailnetListenPort              int64
+		prometheusAddress              string
+		debugAddress                   string
+		slogHumanPath                  string
+		slogJSONPath                   string
+		slogStackdriverPath            string
+		blockFileTransfer              bool
+		agentHeaderCommand             string
+		agentHeader                    []string
+		devcontainers                  bool
+		devcontainerProjectDiscovery   bool
+		devcontainerDiscoveryAutostart bool
 	)
 	cmd := &serpent.Command{
 		Use:   "agent",
@@ -321,7 +322,7 @@ func (r *RootCmd) workspaceAgent() *serpent.Command {
 				return xerrors.Errorf("create agent execer: %w", err)
 			}
 
-			if experimentalDevcontainersEnabled {
+			if devcontainers {
 				logger.Info(ctx, "agent devcontainer detection enabled")
 			} else {
 				logger.Info(ctx, "agent devcontainer detection not enabled")
@@ -359,12 +360,14 @@ func (r *RootCmd) workspaceAgent() *serpent.Command {
 					SSHMaxTimeout:        sshMaxTimeout,
 					Subsystems:           subsystems,
 
-					PrometheusRegistry:               prometheusRegistry,
-					BlockFileTransfer:                blockFileTransfer,
-					Execer:                           execer,
-					ExperimentalDevcontainersEnabled: experimentalDevcontainersEnabled,
-					ContainerAPIOptions: []agentcontainers.Option{
+					PrometheusRegistry: prometheusRegistry,
+					BlockFileTransfer:  blockFileTransfer,
+					Execer:             execer,
+					Devcontainers:      devcontainers,
+					DevcontainerAPIOptions: []agentcontainers.Option{
 						agentcontainers.WithSubAgentURL(r.agentURL.String()),
+						agentcontainers.WithProjectDiscovery(devcontainerProjectDiscovery),
+						agentcontainers.WithDiscoveryAutostart(devcontainerDiscoveryAutostart),
 					},
 				})
 
@@ -506,10 +509,24 @@ func (r *RootCmd) workspaceAgent() *serpent.Command {
 		},
 		{
 			Flag:        "devcontainers-enable",
-			Default:     "false",
+			Default:     "true",
 			Env:         "CODER_AGENT_DEVCONTAINERS_ENABLE",
 			Description: "Allow the agent to automatically detect running devcontainers.",
-			Value:       serpent.BoolOf(&experimentalDevcontainersEnabled),
+			Value:       serpent.BoolOf(&devcontainers),
+		},
+		{
+			Flag:        "devcontainers-project-discovery-enable",
+			Default:     "true",
+			Env:         "CODER_AGENT_DEVCONTAINERS_PROJECT_DISCOVERY_ENABLE",
+			Description: "Allow the agent to search the filesystem for devcontainer projects.",
+			Value:       serpent.BoolOf(&devcontainerProjectDiscovery),
+		},
+		{
+			Flag:        "devcontainers-discovery-autostart-enable",
+			Default:     "false",
+			Env:         "CODER_AGENT_DEVCONTAINERS_DISCOVERY_AUTOSTART_ENABLE",
+			Description: "Allow the agent to autostart devcontainer projects it discovers based on their configuration.",
+			Value:       serpent.BoolOf(&devcontainerDiscoveryAutostart),
 		},
 	}
 

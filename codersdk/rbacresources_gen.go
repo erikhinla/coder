@@ -9,7 +9,7 @@ const (
 	ResourceAssignOrgRole                 RBACResource = "assign_org_role"
 	ResourceAssignRole                    RBACResource = "assign_role"
 	ResourceAuditLog                      RBACResource = "audit_log"
-	ResourceChat                          RBACResource = "chat"
+	ResourceConnectionLog                 RBACResource = "connection_log"
 	ResourceCryptoKey                     RBACResource = "crypto_key"
 	ResourceDebugInfo                     RBACResource = "debug_info"
 	ResourceDeploymentConfig              RBACResource = "deployment_config"
@@ -28,6 +28,7 @@ const (
 	ResourceOauth2AppSecret               RBACResource = "oauth2_app_secret"
 	ResourceOrganization                  RBACResource = "organization"
 	ResourceOrganizationMember            RBACResource = "organization_member"
+	ResourcePrebuiltWorkspace             RBACResource = "prebuilt_workspace"
 	ResourceProvisionerDaemon             RBACResource = "provisioner_daemon"
 	ResourceProvisionerJobs               RBACResource = "provisioner_jobs"
 	ResourceReplicas                      RBACResource = "replicas"
@@ -35,6 +36,7 @@ const (
 	ResourceTailnetCoordinator            RBACResource = "tailnet_coordinator"
 	ResourceTemplate                      RBACResource = "template"
 	ResourceUser                          RBACResource = "user"
+	ResourceUserSecret                    RBACResource = "user_secret"
 	ResourceWebpushSubscription           RBACResource = "webpush_subscription"
 	ResourceWorkspace                     RBACResource = "workspace"
 	ResourceWorkspaceAgentDevcontainers   RBACResource = "workspace_agent_devcontainers"
@@ -72,7 +74,7 @@ var RBACResourceActions = map[RBACResource][]RBACAction{
 	ResourceAssignOrgRole:                 {ActionAssign, ActionCreate, ActionDelete, ActionRead, ActionUnassign, ActionUpdate},
 	ResourceAssignRole:                    {ActionAssign, ActionRead, ActionUnassign},
 	ResourceAuditLog:                      {ActionCreate, ActionRead},
-	ResourceChat:                          {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
+	ResourceConnectionLog:                 {ActionRead, ActionUpdate},
 	ResourceCryptoKey:                     {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceDebugInfo:                     {ActionRead},
 	ResourceDeploymentConfig:              {ActionRead, ActionUpdate},
@@ -91,6 +93,7 @@ var RBACResourceActions = map[RBACResource][]RBACAction{
 	ResourceOauth2AppSecret:               {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceOrganization:                  {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceOrganizationMember:            {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
+	ResourcePrebuiltWorkspace:             {ActionDelete, ActionUpdate},
 	ResourceProvisionerDaemon:             {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceProvisionerJobs:               {ActionCreate, ActionRead, ActionUpdate},
 	ResourceReplicas:                      {ActionRead},
@@ -98,6 +101,7 @@ var RBACResourceActions = map[RBACResource][]RBACAction{
 	ResourceTailnetCoordinator:            {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceTemplate:                      {ActionCreate, ActionDelete, ActionRead, ActionUpdate, ActionUse, ActionViewInsights},
 	ResourceUser:                          {ActionCreate, ActionDelete, ActionRead, ActionReadPersonal, ActionUpdate, ActionUpdatePersonal},
+	ResourceUserSecret:                    {ActionCreate, ActionDelete, ActionRead, ActionUpdate},
 	ResourceWebpushSubscription:           {ActionCreate, ActionDelete, ActionRead},
 	ResourceWorkspace:                     {ActionApplicationConnect, ActionCreate, ActionCreateAgent, ActionDelete, ActionDeleteAgent, ActionRead, ActionSSH, ActionWorkspaceStart, ActionWorkspaceStop, ActionUpdate},
 	ResourceWorkspaceAgentDevcontainers:   {ActionCreate},

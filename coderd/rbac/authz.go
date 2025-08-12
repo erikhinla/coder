@@ -65,6 +65,7 @@ const (
 	SubjectTypeUser                         SubjectType = "user"
 	SubjectTypeProvisionerd                 SubjectType = "provisionerd"
 	SubjectTypeAutostart                    SubjectType = "autostart"
+	SubjectTypeConnectionLogger             SubjectType = "connection_logger"
 	SubjectTypeJobReaper                    SubjectType = "job_reaper"
 	SubjectTypeResourceMonitor              SubjectType = "resource_monitor"
 	SubjectTypeCryptoKeyRotator             SubjectType = "crypto_key_rotator"
@@ -760,7 +761,6 @@ func rbacTraceAttributes(actor Subject, action policy.Action, objectType string,
 	uniqueRoleNames := actor.SafeRoleNames()
 	roleStrings := make([]string, 0, len(uniqueRoleNames))
 	for _, roleName := range uniqueRoleNames {
-		roleName := roleName
 		roleStrings = append(roleStrings, roleName.String())
 	}
 	return trace.WithAttributes(
