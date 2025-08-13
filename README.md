@@ -8,7 +8,7 @@
   </a>
 
   <h1>
-  Self-Hosted Cloud Development Environments
+  Self-Hosted AI Coding Environments
   </h1>
 
   <a href="https://coder.com#gh-light-mode-only">
@@ -33,20 +33,21 @@
 
 </div>
 
-[Coder](https://coder.com) enables organizations to set up development environments in their public or private cloud infrastructure. Cloud development environments are defined with Terraform, connected through a secure high-speed Wireguard® tunnel, and automatically shut down when not used to save on costs. Coder gives engineering teams the flexibility to use the cloud for workloads most beneficial to them.
+[Coder](https://coder.com) enables organizations to run AI coding agents and development environments in their public or private cloud infrastructure. With built-in support for coding agents like Claude Code, Aider, and Cursor integration, plus enterprise LLM providers, Coder gives AI-powered development teams secure, scalable, and cost-effective infrastructure for their workflows.
 
-- Define cloud development environments in Terraform
-  - EC2 VMs, Kubernetes Pods, Docker Containers, etc.
-- Automatically shutdown idle resources to save on costs
-- Onboard developers in seconds instead of days
+- **AI Coding Agents**: Run Claude Code, Aider, and custom agents via chat-based UI
+- **Enterprise AI Integration**: AWS Bedrock, GCP Vertex, and self-hosted models
+- **IDE AI Extensions**: Built-in support for Cursor, Windsurf, GitHub Copilot, and more
+- **Secure & Scalable**: Self-hosted with automatic resource management
+- **Cost Optimized**: Automatically shutdown idle AI workloads to save on costs
 
 <p align="center">
-  <img src="./docs/images/hero-image.png" alt="Coder Hero Image">
+  <img src="./docs/images/guides/ai-agents/tasks-ui.png" alt="Coder AI Tasks Interface">
 </p>
 
 ## Quickstart
 
-The most convenient way to try Coder is to install it on your local machine and experiment with provisioning cloud development environments using Docker (works on Linux, macOS, and Windows).
+The most convenient way to try Coder is to install it on your local machine and experiment with AI coding agents using Docker (works on Linux, macOS, and Windows).
 
 ```shell
 # First, install Coder
@@ -56,7 +57,7 @@ curl -L https://coder.com/install.sh | sh
 coder server
 
 # Navigate to http://localhost:3000 to create your initial user,
-# create a Docker template and provision a workspace
+# create an AI-enabled template and start coding with agents
 ```
 
 ## Install
@@ -90,9 +91,10 @@ Use `coder --help` to get a list of flags and environment variables. Use our [in
 
 Browse our docs [here](https://coder.com/docs) or visit a specific section below:
 
+- [**AI Coding Agents**](https://coder.com/docs/ai-coder): Run and manage coding agents like Claude Code and Aider
 - [**Templates**](https://coder.com/docs/templates): Templates are written in Terraform and describe the infrastructure for workspaces
 - [**Workspaces**](https://coder.com/docs/workspaces): Workspaces contain the IDEs, dependencies, and configuration information needed for software development
-- [**IDEs**](https://coder.com/docs/ides): Connect your existing editor to a workspace
+- [**IDEs**](https://coder.com/docs/ides): Connect AI-powered editors like Cursor, Windsurf, and VS Code to workspaces
 - [**Administration**](https://coder.com/docs/admin): Learn how to operate Coder
 - [**Premium**](https://coder.com/pricing#compare-plans): Learn about our paid features built for large teams
 
@@ -108,9 +110,19 @@ We are always working on new integrations. Please feel free to open an issue and
 
 ### Official
 
+**AI & Coding Agents:**
+
+- [**MCP Server**](https://coder.com/docs/ai-coder/mcp-server): Connect Claude Desktop, Cursor, and other AI agents to Coder
+- [**Coder Tasks (Beta)**](https://coder.com/docs/ai-coder/tasks): Chat-based interface for running coding agents
+
+**IDEs & Extensions:**
+
 - [**VS Code Extension**](https://marketplace.visualstudio.com/items?itemName=coder.coder-remote): Open any Coder workspace in VS Code with a single click
 - [**JetBrains Toolbox Plugin**](https://plugins.jetbrains.com/plugin/26968-coder): Open any Coder workspace from JetBrains Toolbox with a single click
 - [**JetBrains Gateway Plugin**](https://plugins.jetbrains.com/plugin/19620-coder): Open any Coder workspace in JetBrains Gateway with a single click
+
+**Development Tools:**
+
 - [**Dev Container Builder**](https://github.com/coder/envbuilder): Build development environments using `devcontainer.json` on Docker, Kubernetes, and OpenShift
 - [**Coder Registry**](https://registry.coder.com): Build and extend development environments with common use-cases
 - [**Kubernetes Log Stream**](https://github.com/coder/coder-logstream-kube): Stream Kubernetes Pod events to the Coder startup logs
