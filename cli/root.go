@@ -40,6 +40,8 @@ import (
 	"github.com/coder/coder/v2/cli/telemetry"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/agentsdk"
+	// new: sessionstore for platform-specific secure token storage
+	"github.com/coder/coder/v2/cli/sessionstore"
 )
 
 var (
@@ -550,13 +552,20 @@ func (r *RootCmd) InitClient(client *codersdk.Client) serpent.MiddlewareFunc {
 					return err
 				}
 			}
-			// Read the token stored on disk.
+			// Read the token stored securely (platform-specific) with file fallback.
 			if r.token == "" {
-				r.token, err = conf.Session().Read()
-				// Even if there isn't a token, we don't care.
-				// Some API routes can be unauthenticated.
-				if err != nil && !os.IsNotExist(err) {
-					return err
+				tok, source, fellBack, rerr := sessionstore.Read(conf, r.clientURL)
+				if rerr != nil && !os.IsNotExist(rerr) {
+					return rerr
+				}
+				if tok != "" {
+					r.token = tok
+				}
+				// If we fell back to file on darwin, warn once.
+				if fellBack && runtime.GOOS == "darwin" {
+					_, _ = fmt.Fprintln(inv.Stderr, pretty.Sprint(cliui.DefaultStyles.Warn,
+						"Token stored in plaintext config because macOS Keychain access failed. This is less secure than keychain storage."))
+					_ = source // keep variable referenced in case of future conditional logging
 				}
 			}
 
@@ -599,13 +608,19 @@ func (r *RootCmd) TryInitClient(client *codersdk.Client) serpent.MiddlewareFunc 
 					}
 				}
 			}
-			// Read the token stored on disk.
+			// Read the token stored securely (platform-specific) with file fallback.
 			if r.token == "" {
-				r.token, err = conf.Session().Read()
-				// Even if there isn't a token, we don't care.
-				// Some API routes can be unauthenticated.
-				if err != nil && !os.IsNotExist(err) {
-					return err
+				tok, source, fellBack, rerr := sessionstore.Read(conf, r.clientURL)
+				if rerr != nil && !os.IsNotExist(rerr) {
+					return rerr
+				}
+				if tok != "" {
+					r.token = tok
+				}
+				if fellBack && runtime.GOOS == "darwin" {
+					_, _ = fmt.Fprintln(inv.Stderr, pretty.Sprint(cliui.DefaultStyles.Warn,
+						"Token stored in plaintext config because macOS Keychain access failed. This is less secure than keychain storage."))
+					_ = source
 				}
 			}
 
@@ -1400,7 +1415,7 @@ func headerTransport(ctx context.Context, serverURL *url.URL, header []string, h
 		cmd.Stderr = io.Discard
 		err := cmd.Run()
 		if err != nil {
-			return nil, xerrors.Errorf("failed to run %v: %w", cmd.Args, err)
+			return nil, xerrors.Errorf("failed to run %f: %w", cmd.Args, err)
 		}
 		scanner := bufio.NewScanner(&outBuf)
 		for scanner.Scan() {

@@ -22,6 +22,8 @@ import (
 	"github.com/coder/coder/v2/coderd/userpassword"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/serpent"
+	// new: sessionstore for platform-specific secure token storage
+	"github.com/coder/coder/v2/cli/sessionstore"
 )
 
 const (
@@ -115,9 +117,12 @@ func (r *RootCmd) loginWithPassword(
 
 	sessionToken := resp.SessionToken
 	config := r.createConfig()
-	err = config.Session().Write(sessionToken)
-	if err != nil {
-		return xerrors.Errorf("write session token: %w", err)
+	_, fellBack, werr := sessionstore.Write(config, client.URL, sessionToken)
+	if werr != nil {
+		return xerrors.Errorf("write session token: %w", werr)
+	}
+	if fellBack && runtime.GOOS == goosDarwin {
+		cliui.Warn(inv.Stderr, "Token stored in plaintext config because macOS Keychain access failed. This is less secure than keychain storage.")
 	}
 
 	client.SetSessionToken(sessionToken)
@@ -394,9 +399,12 @@ func (r *RootCmd) login() *serpent.Command {
 			}
 
 			config := r.createConfig()
-			err = config.Session().Write(sessionToken)
-			if err != nil {
-				return xerrors.Errorf("write session token: %w", err)
+			_, fellBack, werr := sessionstore.Write(config, client.URL, sessionToken)
+			if werr != nil {
+				return xerrors.Errorf("write session token: %w", werr)
+			}
+			if fellBack && runtime.GOOS == goosDarwin {
+				cliui.Warn(inv.Stderr, "Token stored in plaintext config because macOS Keychain access failed. This is less secure than keychain storage.")
 			}
 			err = config.URL().Write(serverURL.String())
 			if err != nil {

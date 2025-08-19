@@ -10,6 +10,8 @@ import (
 	"github.com/coder/coder/v2/cli/cliui"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/serpent"
+	// new: sessionstore for platform-specific secure token storage
+	"github.com/coder/coder/v2/cli/sessionstore"
 )
 
 func (r *RootCmd) logout() *serpent.Command {
@@ -47,7 +49,8 @@ func (r *RootCmd) logout() *serpent.Command {
 				errors = append(errors, xerrors.Errorf("remove URL file: %w", err))
 			}
 
-			err = config.Session().Delete()
+			// Remove from both keychain (macOS) and file (fallback)
+			err = sessionstore.Delete(config, client.URL)
 			// Only throw error if the session configuration file is present,
 			// otherwise the user is already logged out, and we proceed
 			if err != nil && !os.IsNotExist(err) {
