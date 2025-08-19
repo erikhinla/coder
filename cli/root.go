@@ -1415,7 +1415,7 @@ func headerTransport(ctx context.Context, serverURL *url.URL, header []string, h
 		cmd.Stderr = io.Discard
 		err := cmd.Run()
 		if err != nil {
-			return nil, xerrors.Errorf("failed to run %f: %w", cmd.Args, err)
+			return nil, xerrors.Errorf("failed to run %v: %w", cmd.Args, err)
 		}
 		scanner := bufio.NewScanner(&outBuf)
 		for scanner.Scan() {
