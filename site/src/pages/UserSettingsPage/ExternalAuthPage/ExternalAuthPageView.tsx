@@ -37,7 +37,10 @@ type ExternalAuthPageViewProps = {
 	getAuthsError?: unknown;
 	unlinked: number;
 	auths?: ListUserExternalAuthResponse;
-	onUnlinkExternalAuth: (provider: string, supports_revocation: boolean) => void;
+	onUnlinkExternalAuth: (
+		provider: string,
+		supports_revocation: boolean,
+	) => void;
 	onValidateExternalAuth: (provider: string) => void;
 };
 

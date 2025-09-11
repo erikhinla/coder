@@ -381,6 +381,130 @@ func TestRefreshToken(t *testing.T) {
 	})
 }
 
+func TestRevokeToken(t *testing.T) {
+	t.Parallel()
+
+	t.Run("RevokeTokenRFC_OK", func(t *testing.T) {
+		t.Parallel()
+		var link database.ExternalAuthLink
+		var config *externalauth.Config
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenRFC(func() (int, error) {
+					return http.StatusOK, nil
+				}),
+			},
+		})
+
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		revoked, err := config.RevokeToken(ctx, link)
+		require.NoError(t, err)
+		require.True(t, revoked)
+	})
+
+	t.Run("RevokeTokenRFC_WrongBearer", func(t *testing.T) {
+		t.Parallel()
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenRFC(func() (int, error) {
+					return http.StatusOK, nil
+				}),
+			},
+		})
+
+		link.OAuthAccessToken += "wrong_token"
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		revoked, err := config.RevokeToken(ctx, link)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "token validation failed")
+		require.False(t, revoked)
+	})
+
+	t.Run("RevokeTokenRFC_WrongURL", func(t *testing.T) {
+		t.Parallel()
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenRFC(func() (int, error) {
+					return http.StatusOK, nil
+				}),
+			},
+		})
+
+		config.RevokeURL = "%"
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		revoked, err := config.RevokeToken(ctx, link)
+		require.Error(t, err)
+		require.ErrorContains(t, err, "invalid URL escape")
+		require.False(t, revoked)
+	})
+
+	t.Run("RevokeTokenRFC_Timeout", func(t *testing.T) {
+		t.Parallel()
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenRFC(func() (int, error) {
+					time.Sleep(time.Millisecond * 200)
+					return http.StatusOK, nil
+				}),
+				oidctest.WithServing(),
+			},
+		})
+
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		config.RevokeTimeout = time.Millisecond * 20
+		revoked, err := config.RevokeToken(ctx, link)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.False(t, revoked)
+	})
+
+	t.Run("RevokeTokenGitHub_OK", func(t *testing.T) {
+		t.Parallel()
+		clientID := "clientID"
+		clientSecret := "clientSecret"
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenGitHub(func() (int, error) {
+					return http.StatusNoContent, nil
+				}),
+				oidctest.WithStaticCredentials(clientID, clientSecret),
+				oidctest.WithServing(),
+			},
+		})
+
+		config.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
+		config.ClientID = clientID
+		config.ClientSecret = clientSecret
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		revoked, err := config.RevokeToken(ctx, link)
+		require.NoError(t, err)
+		require.True(t, revoked)
+	})
+
+	t.Run("RevokeTokenGitHub_WrongAuth", func(t *testing.T) {
+		t.Parallel()
+		clientID := "clientID"
+		clientSecret := "clientSecret"
+		fake, config, link := setupOauth2Test(t, testConfig{
+			FakeIDPOpts: []oidctest.FakeIDPOpt{
+				oidctest.WithRevokeTokenGitHub(func() (int, error) {
+					return http.StatusNoContent, nil
+				}),
+				oidctest.WithStaticCredentials(clientID, clientSecret),
+				oidctest.WithServing(),
+			},
+		})
+
+		config.Type = codersdk.EnhancedExternalAuthProviderGitHub.String()
+		config.ClientID = clientID + "bad"
+		config.ClientSecret = clientSecret
+		ctx := oidc.ClientContext(context.Background(), fake.HTTPClient(nil))
+		revoked, err := config.RevokeToken(ctx, link)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "basic auth failed")
+		require.False(t, revoked)
+	})
+}
+
 func TestExchangeWithClientSecret(t *testing.T) {
 	t.Parallel()
 	instrument := promoauth.NewFactory(prometheus.NewRegistry())
@@ -414,6 +538,53 @@ func TestExchangeWithClientSecret(t *testing.T) {
 
 	_, err = config.Exchange(context.WithValue(context.Background(), oauth2.HTTPClient, client), "code")
 	require.NoError(t, err)
+}
+
+func TestTokenRevocationResponseOk(t *testing.T) {
+	t.Parallel()
+
+	ghType := codersdk.EnhancedExternalAuthProviderGitHub.String()
+	rfcType := codersdk.EnhancedExternalAuthProviderAzureDevops.String()
+	tests := []struct {
+		name string
+		conf *externalauth.Config
+		resp http.Response
+		want bool
+	}{
+		{
+			name: "GH_bad",
+			conf: &externalauth.Config{Type: ghType},
+			resp: http.Response{StatusCode: http.StatusOK},
+			want: false,
+		},
+		{
+			name: "GH_ok",
+			conf: &externalauth.Config{Type: ghType},
+			resp: http.Response{StatusCode: http.StatusNoContent},
+			want: true,
+		},
+		{
+			name: "RFC_ok",
+			conf: &externalauth.Config{Type: rfcType},
+			resp: http.Response{StatusCode: http.StatusOK},
+			want: true,
+		},
+		{
+			name: "RFC_bad",
+			conf: &externalauth.Config{Type: rfcType},
+			resp: http.Response{StatusCode: http.StatusNoContent},
+			want: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := tc.conf.TokenRevocationResponseOk(&tc.resp)
+			if tc.want != got {
+				t.Errorf("unexpected response success, got: %v want: %v", got, tc.want)
+			}
+		})
+	}
 }
 
 func TestConvertYAML(t *testing.T) {
@@ -594,11 +765,16 @@ func setupOauth2Test(t *testing.T, settings testConfig) (*oidctest.FakeIDP, *ext
 	)
 
 	f := promoauth.NewFactory(prometheus.NewRegistry())
+	cid, cs := fake.AppCredentials()
 	config := &externalauth.Config{
 		InstrumentedOAuth2Config: f.New("test-oauth2",
 			fake.OIDCConfig(t, nil, settings.CoderOIDCConfigOpts...)),
-		ID:          providerID,
-		ValidateURL: fake.WellknownConfig().UserInfoURL,
+		ID:            providerID,
+		ClientID:      cid,
+		ClientSecret:  cs,
+		ValidateURL:   fake.WellknownConfig().UserInfoURL,
+		RevokeURL:     fake.WellknownConfig().RevokeURL,
+		RevokeTimeout: 1 * time.Second,
 	}
 	settings.ExternalAuthOpt(config)
 

@@ -34,6 +34,9 @@ const (
 	// database for a failed refresh token. In rare cases, the error could be a large
 	// HTML payload.
 	failureReasonLimit = 400
+
+	// tokenRevocationTimeout timeout for requests to external oauth provider.
+	tokenRevocationTimeout = 10 * time.Second
 )
 
 // Config is used for authentication for Git operations.
@@ -44,7 +47,7 @@ type Config struct {
 	// Type is the type of provider.
 	Type string
 
-	ClientId     string
+	ClientID     string
 	ClientSecret string
 	// DeviceAuth is set if the provider uses the device flow.
 	DeviceAuth *DeviceAuth
@@ -72,7 +75,8 @@ type Config struct {
 	// not be validated before being returned.
 	ValidateURL string
 
-	RevokeURL string
+	RevokeURL     string
+	RevokeTimeout time.Duration
 
 	// Regex is a Regexp matched against URLs for
 	// a Git clone. e.g. "Username for 'https://github.com':"
@@ -395,13 +399,9 @@ func (c *Config) RevokeToken(ctx context.Context, link database.ExternalAuthLink
 		return false, nil
 	}
 
-	var err error
-	var req *http.Request
-	if c.Type == codersdk.EnhancedExternalAuthProviderGitHub.String() {
-		req, err = c.tokenRevocationRequestGitHub(ctx, link)
-	} else {
-		req, err = c.tokenRevocationRequestRFC7009(ctx, link)
-	}
+	reqCtx, cancel := context.WithTimeout(ctx, c.RevokeTimeout)
+	defer cancel()
+	req, err := c.TokenRevocationRequest(reqCtx, link)
 	if err != nil {
 		return false, err
 	}
@@ -411,32 +411,58 @@ func (c *Config) RevokeToken(ctx context.Context, link database.ExternalAuthLink
 		return false, err
 	}
 	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return false, err
+	}
 
-	return res.StatusCode == http.StatusOK, nil
+	if c.TokenRevocationResponseOk(res) {
+		return true, nil
+	}
+	return false, xerrors.Errorf("failed to revoke token: %d %s", res.StatusCode, string(body))
 }
 
-func (c *Config) tokenRevocationRequestRFC7009(ctx context.Context, link database.ExternalAuthLink) (*http.Request, error) {
+func (c *Config) TokenRevocationRequest(ctx context.Context, link database.ExternalAuthLink) (*http.Request, error) {
+	if c.Type == codersdk.EnhancedExternalAuthProviderGitHub.String() {
+		return c.TokenRevocationRequestGitHub(ctx, link)
+	}
+	return c.TokenRevocationRequestRFC7009(ctx, link)
+}
+
+func (c *Config) TokenRevocationRequestRFC7009(ctx context.Context, link database.ExternalAuthLink) (*http.Request, error) {
 	p := url.Values{}
-	p.Add("client_id", c.ClientId)
+	p.Add("client_id", c.ClientID)
 	p.Add("client_secret", c.ClientSecret)
 	p.Add("token_type_hint", "refresh_token")
 	p.Add("token", link.OAuthRefreshToken)
-	body := p.Encode()
-	return http.NewRequestWithContext(ctx, http.MethodPost, c.RevokeURL, strings.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.RevokeURL, strings.NewReader(p.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", link.OAuthAccessToken))
+	return req, nil
 }
 
-func (c *Config) tokenRevocationRequestGitHub(ctx context.Context, link database.ExternalAuthLink) (*http.Request, error) {
-	// GitHub doesn't follow RFC spec, GitHub specific request is needed
+func (c *Config) TokenRevocationRequestGitHub(ctx context.Context, link database.ExternalAuthLink) (*http.Request, error) {
+	// GitHub doesn't follow RFC spec
 	// https://docs.github.com/en/rest/apps/oauth-applications?apiVersion=2022-11-28#delete-an-app-authorization
-	body := fmt.Sprintf("{\"access_token\":\"%s\"}", link.OAuthAccessToken)
+	body := fmt.Sprintf("{\"access_token\":%q}", link.OAuthAccessToken)
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.RevokeURL, strings.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Add("Accept", "application/vnd.github+json")
 	req.Header.Add("X-GitHub-Api-Version", "2022-11-28")
-	req.SetBasicAuth(c.ClientId, c.ClientSecret)
+	req.SetBasicAuth(c.ClientID, c.ClientSecret)
 	return req, nil
+}
+
+func (c *Config) TokenRevocationResponseOk(res *http.Response) bool {
+	// RFC spec on successful revocation returns 200, GitHub 204
+	if c.Type == codersdk.EnhancedExternalAuthProviderGitHub.String() {
+		return res.StatusCode == http.StatusNoContent
+	}
+	return res.StatusCode == http.StatusOK
 }
 
 type DeviceAuth struct {
@@ -665,13 +691,14 @@ func ConvertConfig(instrument *promoauth.Factory, entries []codersdk.ExternalAut
 		cfg := &Config{
 			InstrumentedOAuth2Config: instrumented,
 			ID:                       entry.ID,
-			ClientId:                 entry.ClientID,
+			ClientID:                 entry.ClientID,
 			ClientSecret:             entry.ClientSecret,
 			Regex:                    regex,
 			Type:                     entry.Type,
 			NoRefresh:                entry.NoRefresh,
 			ValidateURL:              entry.ValidateURL,
 			RevokeURL:                entry.RevokeURL,
+			RevokeTimeout:            tokenRevocationTimeout,
 			AppInstallationsURL:      entry.AppInstallationsURL,
 			AppInstallURL:            entry.AppInstallURL,
 			DisplayName:              entry.DisplayName,

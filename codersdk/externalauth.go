@@ -74,9 +74,9 @@ type ListUserExternalAuthResponse struct {
 }
 
 type DeleteExternalAuthByIDResponse struct {
-	// TokenRevocationSuccessful set to true if
-	// token revocation in provider was succesfful
-	TokenRevocationSuccessful bool
+	// TokenRevoked set to true if token revocation was attempted and was succesfful
+	TokenRevoked         bool   `json:"token_revoked"`
+	TokenRevocationError string `json:"token_revocation_error,omitempty"`
 }
 
 // ExternalAuthLink is a link between a user and an external auth provider.
@@ -174,16 +174,22 @@ func (c *Client) ExternalAuthByID(ctx context.Context, provider string) (Externa
 
 // UnlinkExternalAuthByID deletes the external auth for the given provider by ID
 // for the user. This does not revoke the token from the IDP.
-func (c *Client) UnlinkExternalAuthByID(ctx context.Context, provider string) error {
+func (c *Client) UnlinkExternalAuthByID(ctx context.Context, provider string) (DeleteExternalAuthByIDResponse, error) {
+	noRevoke := DeleteExternalAuthByIDResponse{TokenRevoked: false}
 	res, err := c.Request(ctx, http.MethodDelete, fmt.Sprintf("/api/v2/external-auth/%s", provider), nil)
 	if err != nil {
-		return err
+		return noRevoke, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return ReadBodyAsError(res)
+		return noRevoke, ReadBodyAsError(res)
 	}
-	return nil
+	var resp DeleteExternalAuthByIDResponse
+	err = json.NewDecoder(res.Body).Decode(&resp)
+	if err != nil {
+		return noRevoke, err
+	}
+	return resp, nil
 }
 
 // ListExternalAuths returns the available external auth providers and the user's

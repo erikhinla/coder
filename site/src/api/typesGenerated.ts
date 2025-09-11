@@ -777,7 +777,8 @@ export interface DatabaseReport extends BaseReport {
 
 // From codersdk/externalauth.go
 export interface DeleteExternalAuthByIDResponse {
-	readonly TokenRevocationSuccessful: boolean;
+	readonly token_revoked: boolean;
+	readonly token_revocation_error?: string;
 }
 
 // From codersdk/notifications.go
@@ -1015,6 +1016,7 @@ export interface ExternalAuthConfig {
 	readonly auth_url: string;
 	readonly token_url: string;
 	readonly validate_url: string;
+	readonly revoke_url: string;
 	readonly app_install_url: string;
 	readonly app_installations_url: string;
 	readonly no_refresh: boolean;

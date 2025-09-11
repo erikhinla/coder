@@ -87,7 +87,7 @@ func (api *API) externalAuthByID(w http.ResponseWriter, r *http.Request) {
 // @Tags Git
 // @Produce json
 // @Param externalauth path string true "Git Provider ID" format(string)
-// @Success 200
+// @Success 200 {object} codersdk.DeleteExternalAuthByIDResponse
 // @Router /external-auth/{externalauth} [delete]
 func (api *API) deleteExternalAuthByID(w http.ResponseWriter, r *http.Request) {
 	config := httpmw.ExternalAuthParam(r)
@@ -98,7 +98,6 @@ func (api *API) deleteExternalAuthByID(w http.ResponseWriter, r *http.Request) {
 		ProviderID: config.ID,
 		UserID:     apiKey.UserID,
 	})
-
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			httpapi.ResourceNotFound(w)
@@ -128,12 +127,12 @@ func (api *API) deleteExternalAuthByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ok, err := config.RevokeToken(ctx, link)
-	if err != nil || !ok {
-		httpapi.Write(ctx, w, http.StatusOK, codersdk.DeleteExternalAuthByIDResponse{TokenRevocationSuccessful: false})
-		return
-	}
+	resp := codersdk.DeleteExternalAuthByIDResponse{TokenRevoked: ok}
 
-	httpapi.Write(ctx, w, http.StatusOK, codersdk.DeleteExternalAuthByIDResponse{TokenRevocationSuccessful: true})
+	if err != nil {
+		resp.TokenRevocationError = err.Error()
+	}
+	httpapi.Write(ctx, w, http.StatusOK, resp)
 }
 
 // @Summary Post external auth device by ID
