@@ -775,6 +775,11 @@ export interface DatabaseReport extends BaseReport {
 	readonly threshold_ms: number;
 }
 
+// From codersdk/externalauth.go
+export interface DeleteExternalAuthByIDResponse {
+	readonly TokenRevocationSuccessful: boolean;
+}
+
 // From codersdk/notifications.go
 export interface DeleteWebpushSubscription {
 	readonly endpoint: string;
